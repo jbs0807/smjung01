@@ -1,4 +1,5 @@
 name: Build Android APK
+# Re-trigger build for PhotoClean UI and photo review update
 on:
   workflow_dispatch:
   push:
@@ -25,4 +26,5 @@ jobs:
         if: success()
         with:
           name: PhotoClean-debug-apk
+          retention-days: 14
           path: app/build/outputs/apk/debug/*.apk

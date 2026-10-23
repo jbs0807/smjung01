@@ -33,6 +33,7 @@ class MainActivity : Activity() {
  private lateinit var resultBox: LinearLayout
  private val navy = Color.rgb(18,35,65)
  private val teal = Color.rgb(0,156,157)
+ private val blue = Color.rgb(15,105,245)
 
  private fun shape(color:Int, radius:Float=24f):GradientDrawable =
   GradientDrawable().apply { setColor(color); cornerRadius=radius }
@@ -41,7 +42,7 @@ class MainActivity : Activity() {
  }
  private fun button(title:String, action:()->Unit)=Button(this).apply {
   text=title; isAllCaps=false; textSize=15f; setTextColor(Color.WHITE)
-  background=shape(navy,22f); setOnClickListener { if(!busy) action() }
+  background=GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,intArrayOf(blue,teal)).apply { cornerRadius=28f }; elevation=6f; setOnClickListener { if(!busy) action() }
  }
  private fun add(container:LinearLayout, view:View, bottom:Int=12) {
   container.addView(view,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=bottom })
@@ -50,7 +51,7 @@ class MainActivity : Activity() {
   super.onCreate(savedInstanceState)
   window.statusBarColor=navy
   window.navigationBarColor=navy
-  val scroll=ScrollView(this).apply { setBackgroundColor(Color.rgb(244,248,251)) }
+  val scroll=ScrollView(this).apply { background=GradientDrawable(GradientDrawable.Orientation.TL_BR,intArrayOf(Color.rgb(222,239,255),Color.WHITE,Color.rgb(223,252,247))) }
   val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(22,30,22,36) }
   scroll.addView(root)
   val header=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(22,24,22,22); background=shape(navy) }
@@ -78,8 +79,16 @@ class MainActivity : Activity() {
   resultBox=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
   add(panel,resultBox,12)
   add(panel,button("휴지통 이동 후보 확인") { requestTrash() },0)
-  add(root,panel)
-  setContentView(scroll)
+  add(root,panel,24)
+  val bottom=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER; setPadding(0,10,0,10) }
+  val run=button("▶  분석 실행") { analyze() }.apply { background=shape(Color.rgb(0,176,118),30f); textSize=18f; elevation=9f }
+  val exit=button("⏻  앱 종료") { AlertDialog.Builder(this@MainActivity).setTitle("사진깔끔 종료").setMessage("앱을 종료하시겠습니까?").setNegativeButton("취소",null).setPositiveButton("종료") { _,_ -> finishAffinity() }.show() }.apply { background=shape(Color.rgb(237,65,89),30f); textSize=18f; elevation=9f }
+  bottom.addView(run,LinearLayout.LayoutParams(0,64,1f).apply { rightMargin=8 })
+  bottom.addView(exit,LinearLayout.LayoutParams(0,64,1f).apply { leftMargin=8 })
+  val shell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(Color.WHITE) }
+  shell.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+  shell.addView(bottom,LinearLayout.LayoutParams(-1,-2).apply { leftMargin=16; rightMargin=16; bottomMargin=8 })
+  setContentView(shell)
  }
  private fun update(message:String,done:Int=0,total:Int=0) {
   runOnUiThread {

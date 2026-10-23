@@ -14,7 +14,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      # GitHub Ubuntu runners include the Android SDK.
+      # Avoid setup-android license/network initialization failure.
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'

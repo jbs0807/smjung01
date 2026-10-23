@@ -42,6 +42,8 @@ class MainActivity : Activity() {
  private var deletedCount=0
  private var deleteFailed=0
  private var awaitingDeletePermission=false
+ private var deletionRunning=false
+ private var deleteTotal=0
  private val tiles=linkedMapOf<String,TextView>()
  private lateinit var runButton:TextView
  private lateinit var stopButton:TextView
@@ -272,7 +274,13 @@ class MainActivity : Activity() {
   super.onActivityResult(requestCode,resultCode,data)
   if(requestCode==3) {
    awaitingDeletePermission=false
-   if(resultCode==RESULT_OK) continueLegacyDelete() else { deleteFailed++; if(pendingDelete.isNotEmpty()) pendingDelete.removeAt(0); continueLegacyDelete() }
+   if(resultCode==RESULT_OK) continueLegacyDelete() else {
+    val remaining=pendingDelete.size
+    pendingDelete.clear(); deletionRunning=false
+    update("삭제 승인 거부 · 나머지 ${remaining}장 중단",deletedCount+deleteFailed,deleteTotal)
+    details.text="삭제 성공 ${deletedCount}장 · 실패 ${deleteFailed}장 · 미처리 ${remaining}장"
+    refreshControls()
+   }
    return
   }
   if(requestCode==2) {
@@ -507,7 +515,7 @@ class MainActivity : Activity() {
   }
  }
  private fun continueLegacyDelete() {
-  if(Build.VERSION.SDK_INT>=30 || awaitingDeletePermission) return
+  if(Build.VERSION.SDK_INT>=30 || awaitingDeletePermission || !deletionRunning) return
   while(pendingDelete.isNotEmpty()) {
    val uri=pendingDelete.first()
    try {
@@ -517,7 +525,7 @@ class MainActivity : Activity() {
    } catch(e:android.app.RecoverableSecurityException) {
     try {
      awaitingDeletePermission=true
-     status.text="Android 10 삭제 승인 대기 · ${deletedCount}장 완료"
+     update("Android 10 시스템 승인 대기 · ${deletedCount+deleteFailed+1}/${deleteTotal}장",deletedCount+deleteFailed,deleteTotal)
      startIntentSenderForResult(e.userAction.actionIntent.intentSender,3,null,0,0,0)
      return
     } catch(ex:Exception) {
@@ -528,7 +536,8 @@ class MainActivity : Activity() {
    }
    update("사진 삭제 처리 중 · 성공 ${deletedCount}장 · 실패 ${deleteFailed}장",deletedCount+deleteFailed,deletedCount+deleteFailed+pendingDelete.size)
   }
-  update("삭제 완료 · 성공 ${deletedCount}장 · 실패 ${deleteFailed}장",deletedCount+deleteFailed,deletedCount+deleteFailed)
+  deletionRunning=false
+  update("삭제 완료 · 성공 ${deletedCount}장 · 실패 ${deleteFailed}장",deleteTotal,deleteTotal)
   details.text="Android 10 영구 삭제 결과 · 성공 ${deletedCount}장 · 실패 ${deleteFailed}장"
   candidates=emptyList(); resultBox.removeAllViews()
   Toast.makeText(this,"삭제 ${deletedCount}장, 실패 ${deleteFailed}장",Toast.LENGTH_LONG).show()
@@ -545,7 +554,7 @@ class MainActivity : Activity() {
      catch(e:Exception) { update("휴지통 이동 오류: ${e.message}") }
     } else {
      pendingDelete=checkedCandidates.toMutableList()
-     deletedCount=0; deleteFailed=0
+     deletedCount=0; deleteFailed=0; deleteTotal=pendingDelete.size; deletionRunning=true
      continueLegacyDelete()
     }
    }.show()

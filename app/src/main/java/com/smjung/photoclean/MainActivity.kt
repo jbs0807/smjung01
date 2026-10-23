@@ -62,6 +62,7 @@ class MainActivity : Activity() {
   add(root,button("▣  휴대폰 전체 사진 불러오기") { scanPhotos() })
   add(root,button("▤  폴더별 사진 선택") { chooseFolders() })
   add(root,button("＋  사진 직접 선택") { pickPhotos() })
+  add(root,button("▧  선택된 사진 확인") { reviewSelected() })
   add(root,button("⌕  완전 중복 분석 시작") { analyze() })
   add(root,button("▧  대용량 사진 찾기 (10MB 이상)") { showLargePhotos() })
   add(root,button("▣  스크린샷만 선택") { selectScreenshots() })
@@ -81,8 +82,17 @@ class MainActivity : Activity() {
   add(panel,button("휴지통 이동 후보 확인") { requestTrash() },0)
   add(root,panel,24)
   val bottom=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER; setPadding(0,10,0,10) }
-  val run=button("▶  분석 실행") { analyze() }.apply { background=shape(Color.rgb(0,176,118),30f); textSize=18f; elevation=9f }
-  val exit=button("⏻  앱 종료") { AlertDialog.Builder(this@MainActivity).setTitle("사진깔끔 종료").setMessage("앱을 종료하시겠습니까?").setNegativeButton("취소",null).setPositiveButton("종료") { _,_ -> finishAffinity() }.show() }.apply { background=shape(Color.rgb(237,65,89),30f); textSize=18f; elevation=9f }
+  fun bottomAction(label:String,color:Int,action:()->Unit):TextView = TextView(this).apply {
+   text=label; textSize=19f; setTypeface(null,Typeface.BOLD)
+   setTextColor(Color.WHITE); gravity=android.view.Gravity.CENTER
+   background=shape(color,30f); elevation=9f
+   setOnClickListener { action() }
+  }
+  val run=bottomAction("▶ 실행",Color.rgb(0,176,118)) { if(!busy) analyze() }
+  val exit=bottomAction("✕ 종료",Color.rgb(237,65,89)) {
+   AlertDialog.Builder(this@MainActivity).setTitle("사진깔끔 종료").setMessage("앱을 종료하시겠습니까?")
+    .setNegativeButton("취소",null).setPositiveButton("종료") { _,_ -> finishAffinity() }.show()
+  }
   bottom.addView(run,LinearLayout.LayoutParams(0,64,1f).apply { rightMargin=8 })
   bottom.addView(exit,LinearLayout.LayoutParams(0,64,1f).apply { leftMargin=8 })
   val shell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(Color.WHITE) }
@@ -276,6 +286,34 @@ class MainActivity : Activity() {
     }
    } catch(e:Exception) { busy=false; update("대용량 검색 오류: ${e.message}") }
   }.start()
+ }
+ private fun reviewSelected() {
+  if(selected.isEmpty()) { Toast.makeText(this,"선택된 사진이 없습니다",Toast.LENGTH_SHORT).show(); return }
+  val photos=selected.toList()
+  val wrap=ScrollView(this)
+  val column=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(16,12,16,12) }
+  wrap.addView(column)
+  add(column,text("선택된 사진 ${photos.size}장 · 최대 100장 미리보기",16f,navy,true),12)
+  photos.take(100).forEachIndexed { index,uri ->
+   val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER_VERTICAL }
+   val thumb=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP }
+   row.addView(thumb,LinearLayout.LayoutParams(88,88).apply { rightMargin=12 })
+   try {
+    val opts=BitmapFactory.Options().apply { inSampleSize=8 }
+    contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it,null,opts) }?.let { thumb.setImageBitmap(it) }
+   } catch(_:Exception) {}
+   val name=uri.lastPathSegment?.takeLast(36) ?: "사진"
+   val label=text("${index+1}. ${name}",13f,navy)
+   row.addView(label,LinearLayout.LayoutParams(0,-2,1f))
+   row.setOnClickListener {
+    try { startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri,"image/*"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }
+    catch(e:Exception) { Toast.makeText(this,"사진 열기 실패",Toast.LENGTH_SHORT).show() }
+   }
+   add(column,row,8)
+  }
+  AlertDialog.Builder(this).setTitle("선택된 사진 확인").setView(wrap)
+   .setNegativeButton("닫기",null)
+   .setPositiveButton("중복 분석") { _,_ -> analyze() }.show()
  }
  private fun requestTrash() {
   if(checkedCandidates.isEmpty()) { Toast.makeText(this,"선택된 중복 후보가 없습니다",Toast.LENGTH_SHORT).show(); return }

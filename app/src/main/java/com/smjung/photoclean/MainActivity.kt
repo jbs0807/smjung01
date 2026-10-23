@@ -7,6 +7,10 @@ import android.content.ContentUris
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.BitmapFactory
+import android.graphics.Bitmap
+import android.provider.Settings
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -20,6 +24,7 @@ import java.security.MessageDigest
 class MainActivity : Activity() {
  private val selected = mutableListOf<Uri>()
  private var candidates = listOf<Uri>()
+ private val checkedCandidates = linkedSetOf<Uri>()
  private var busy = false
  private lateinit var status: TextView
  private lateinit var details: TextView
@@ -56,7 +61,10 @@ class MainActivity : Activity() {
   add(root,button("▣  휴대폰 전체 사진 불러오기") { scanPhotos() })
   add(root,button("▤  폴더별 사진 선택") { chooseFolders() })
   add(root,button("＋  사진 직접 선택") { pickPhotos() })
-  add(root,button("⌕  완전 중복 분석 시작") { analyze() },20)
+  add(root,button("⌕  완전 중복 분석 시작") { analyze() })
+  add(root,button("▧  대용량 사진 찾기 (10MB 이상)") { showLargePhotos() })
+  add(root,button("▣  스크린샷만 선택") { selectScreenshots() })
+  add(root,button("⚙  설치 앱 관리 열기") { startActivity(Intent(Settings.ACTION_APPLICATION_SETTINGS)) },20)
   val panel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(20,22,20,22); background=shape(Color.WHITE) }
   add(panel,text("작업 진행 상황",19f,navy,true),12)
   status=text("준비 완료 · 사진을 불러와 주세요",15f,navy,true)
@@ -90,7 +98,7 @@ class MainActivity : Activity() {
    val found=mutableListOf<Uri>()
    data?.clipData?.let { c -> for(i in 0 until c.itemCount) found.add(c.getItemAt(i).uri) }
    data?.data?.let { if(!found.contains(it)) found.add(it) }
-   selected.clear(); selected.addAll(found); candidates=emptyList()
+   selected.clear(); selected.addAll(found); candidates=emptyList(); checkedCandidates.clear()
    details.text="선택한 사진 ${found.size}장"
    update("사진 선택 완료",found.size,found.size)
    resultBox.removeAllViews()
@@ -123,7 +131,7 @@ class MainActivity : Activity() {
    try {
     val all=loadPhotos()
     runOnUiThread {
-     selected.clear(); selected.addAll(all.map { it.first }); candidates=emptyList()
+     selected.clear(); selected.addAll(all.map { it.first }); candidates=emptyList(); checkedCandidates.clear()
      details.text="전체 사진 ${selected.size}장"
      resultBox.removeAllViews()
      busy=false; update("전체 사진 불러오기 완료",all.size,all.size)
@@ -150,7 +158,7 @@ class MainActivity : Activity() {
       .setPositiveButton("선택 완료") { _,_ ->
        selected.clear()
        names.forEachIndexed { index,name -> if(checked[index]) selected.addAll(folders[name]!!.map { it.first }) }
-       candidates=emptyList(); resultBox.removeAllViews()
+       candidates=emptyList(); checkedCandidates.clear(); resultBox.removeAllViews()
        details.text="선택한 폴더 ${checked.count { it }}개 · 사진 ${selected.size}장"
        update("폴더 선택 완료",selected.size,selected.size)
       }.show()
@@ -161,7 +169,7 @@ class MainActivity : Activity() {
  private fun analyze() {
   if(selected.isEmpty()) { update("먼저 사진이나 폴더를 선택하세요"); return }
   val items=selected.toList()
-  busy=true; candidates=emptyList(); resultBox.removeAllViews()
+  busy=true; candidates=emptyList(); checkedCandidates.clear(); resultBox.removeAllViews()
   update("중복 사진 비교 시작",0,items.size)
   Thread {
    val hashes=linkedMapOf<String,MutableList<Uri>>()
@@ -181,24 +189,92 @@ class MainActivity : Activity() {
    val groups=hashes.values.filter { it.size>1 }
    val found=groups.flatMap { it.drop(1) }
    runOnUiThread {
-    candidates=found; busy=false
+    candidates=groups.take(80).flatMap { it.drop(1) }; busy=false
     update("분석 완료 · 중복 ${groups.size}그룹",items.size,items.size)
     details.text="검사 ${items.size}장 · 중복 후보 ${found.size}장 · 읽기 실패 ${errors}장"
     resultBox.removeAllViews()
     add(resultBox,text(if(found.isEmpty()) "중복된 사진이 없습니다." else "중복 후보 ${found.size}장 발견 · 각 그룹 첫 사진은 보존",15f,navy,true),8)
-    groups.take(30).forEachIndexed { index,group ->
-     add(resultBox,text("${index+1}그룹 · ${group.size}장 · 후보 ${group.size-1}장",13f,Color.DKGRAY),4)
+    groups.take(80).forEachIndexed { index,group ->
+     val groupCard=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(10,12,10,12); background=shape(Color.rgb(241,247,253),18f) }
+     add(groupCard,text("중복 그룹 ${index+1} · ${group.size}장",15f,navy,true),6)
+     group.forEachIndexed { i,uri ->
+      val line=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER_VERTICAL }
+      val preview=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP }
+      line.addView(preview,LinearLayout.LayoutParams(72,72))
+      try {
+       val opts=BitmapFactory.Options().apply { inJustDecodeBounds=true }
+       contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it,null,opts) }
+       val sample=maxOf(1,maxOf(opts.outWidth,opts.outHeight)/160)
+       val small=BitmapFactory.Options().apply { inSampleSize=sample }
+       contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it,null,small) }?.let { preview.setImageBitmap(it) }
+      } catch(_:Exception) {}
+      val check=CheckBox(this).apply {
+       text=if(i==0) "원본 보존 (선택 불가)" else "중복 후보 · 휴지통 선택"
+       isEnabled=i!=0
+       isChecked=i!=0
+       if(i!=0) checkedCandidates.add(uri)
+       setOnCheckedChangeListener { _,value -> if(value) checkedCandidates.add(uri) else checkedCandidates.remove(uri) }
+      }
+      line.addView(check,LinearLayout.LayoutParams(0,-2,1f))
+      add(groupCard,line,6)
+     }
+     add(resultBox,groupCard,12)
     }
+    if(groups.size>80) add(resultBox,text("표시 성능을 위해 첫 80개 그룹만 표시합니다. 나머지 후보는 자동 선택되지 않습니다.",13f,Color.DKGRAY),8)
    }
   }.start()
  }
+ private fun selectScreenshots() {
+  if(!permitted()) return
+  busy=true; update("스크린샷 검색 중...")
+  Thread {
+   try {
+    val found=loadPhotos().filter { it.second.contains("screenshot",true) || it.second.contains("스크린샷",true) }
+    runOnUiThread {
+     selected.clear(); selected.addAll(found.map { it.first }); candidates=emptyList(); checkedCandidates.clear()
+     resultBox.removeAllViews(); busy=false
+     details.text="스크린샷 ${selected.size}장"
+     update("스크린샷 선택 완료",selected.size,selected.size)
+    }
+   } catch(e:Exception) { busy=false; update("스크린샷 오류: ${e.message}") }
+  }.start()
+ }
+ private fun showLargePhotos() {
+  if(!permitted()) return
+  busy=true; update("대용량 사진 검색 중...")
+  Thread {
+   try {
+    val base=MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+    val found=mutableListOf<Pair<Uri,Long>>()
+    val columns=arrayOf(MediaStore.Images.Media._ID,MediaStore.Images.Media.SIZE)
+    contentResolver.query(base,columns,null,null,MediaStore.Images.Media.SIZE+" DESC")?.use { cursor ->
+     val id=cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+     val size=cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
+     while(cursor.moveToNext()) {
+      val bytes=cursor.getLong(size)
+      if(bytes>=10L*1024*1024) found.add(ContentUris.withAppendedId(base,cursor.getLong(id)) to bytes)
+     }
+    }
+    runOnUiThread {
+     busy=false; selected.clear(); selected.addAll(found.map { it.first }); candidates=emptyList(); checkedCandidates.clear()
+     resultBox.removeAllViews()
+     details.text="10MB 이상 사진 ${found.size}장"
+     update("대용량 사진 검색 완료",found.size,found.size)
+     found.take(40).forEach { item ->
+      add(resultBox,text("사진 · %.1f MB".format(item.second/1048576.0),14f,navy),6)
+     }
+     add(resultBox,text("대용량 목록은 정보 확인용입니다. 자동 삭제하지 않습니다.",13f,Color.DKGRAY),8)
+    }
+   } catch(e:Exception) { busy=false; update("대용량 검색 오류: ${e.message}") }
+  }.start()
+ }
  private fun requestTrash() {
-  if(candidates.isEmpty()) { Toast.makeText(this,"중복 분석 후 후보를 확인하세요",Toast.LENGTH_SHORT).show(); return }
+  if(checkedCandidates.isEmpty()) { Toast.makeText(this,"선택된 중복 후보가 없습니다",Toast.LENGTH_SHORT).show(); return }
   AlertDialog.Builder(this).setTitle("휴지통 이동 확인")
    .setMessage("중복 후보 ${candidates.size}장을 휴지통으로 이동할까요? 각 그룹 첫 번째 사진은 보존합니다.")
    .setNegativeButton("취소",null).setPositiveButton("계속") { _,_ ->
     if(Build.VERSION.SDK_INT>=30) {
-     try { startIntentSenderForResult(MediaStore.createTrashRequest(contentResolver,candidates,true).intentSender,2,null,0,0,0) }
+     try { startIntentSenderForResult(MediaStore.createTrashRequest(contentResolver,checkedCandidates.toList(),true).intentSender,2,null,0,0,0) }
      catch(e:Exception) { update("휴지통 이동 오류: ${e.message}") }
     } else update("Android 10에서는 시스템 휴지통 이동 API가 지원되지 않습니다. 사진을 삭제하지 않았습니다.")
    }.show()

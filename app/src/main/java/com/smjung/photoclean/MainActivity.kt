@@ -38,6 +38,10 @@ class MainActivity : Activity() {
  }
  private var task:Task?=null
  private var lastAction=""
+ private var pendingDelete=mutableListOf<Uri>()
+ private var deletedCount=0
+ private var deleteFailed=0
+ private var awaitingDeletePermission=false
  private val tiles=linkedMapOf<String,TextView>()
  private lateinit var runButton:TextView
  private lateinit var stopButton:TextView
@@ -266,6 +270,16 @@ class MainActivity : Activity() {
  }
  override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
   super.onActivityResult(requestCode,resultCode,data)
+  if(requestCode==3) {
+   awaitingDeletePermission=false
+   if(resultCode==RESULT_OK) continueLegacyDelete() else { deleteFailed++; if(pendingDelete.isNotEmpty()) pendingDelete.removeAt(0); continueLegacyDelete() }
+   return
+  }
+  if(requestCode==2) {
+   if(resultCode==RESULT_OK) { update("시스템 휴지통 요청 승인됨 · 사진 목록을 다시 확인하세요"); checkedCandidates.clear(); candidates=emptyList(); resultBox.removeAllViews() }
+   else update("휴지통 이동 취소됨 · 사진은 보존되었습니다")
+   return
+  }
   if(requestCode==1 && resultCode==RESULT_OK) {
    val found=mutableListOf<Uri>()
    data?.clipData?.let { c -> for(i in 0 until c.itemCount) found.add(c.getItemAt(i).uri) }
@@ -491,15 +505,48 @@ class MainActivity : Activity() {
    }; complete
   }
  }
+ private fun continueLegacyDelete() {
+  if(Build.VERSION.SDK_INT>=30 || awaitingDeletePermission) return
+  while(pendingDelete.isNotEmpty()) {
+   val uri=pendingDelete.first()
+   try {
+    val rows=contentResolver.delete(uri,null,null)
+    if(rows>0) { deletedCount++; checkedCandidates.remove(uri) } else deleteFailed++
+    pendingDelete.removeAt(0)
+   } catch(e:android.app.RecoverableSecurityException) {
+    try {
+     awaitingDeletePermission=true
+     status.text="Android 10 삭제 승인 대기 · ${deletedCount}장 완료"
+     startIntentSenderForResult(e.userAction.actionIntent.intentSender,3,null,0,0,0)
+     return
+    } catch(ex:Exception) {
+     awaitingDeletePermission=false; deleteFailed++; pendingDelete.removeAt(0)
+    }
+   } catch(e:Exception) {
+    deleteFailed++; pendingDelete.removeAt(0)
+   }
+   update("사진 삭제 처리 중 · 성공 ${deletedCount}장 · 실패 ${deleteFailed}장",deletedCount+deleteFailed,deletedCount+deleteFailed+pendingDelete.size)
+  }
+  update("삭제 완료 · 성공 ${deletedCount}장 · 실패 ${deleteFailed}장",deletedCount+deleteFailed,deletedCount+deleteFailed)
+  details.text="Android 10 영구 삭제 결과 · 성공 ${deletedCount}장 · 실패 ${deleteFailed}장"
+  candidates=emptyList(); resultBox.removeAllViews()
+  Toast.makeText(this,"삭제 ${deletedCount}장, 실패 ${deleteFailed}장",Toast.LENGTH_LONG).show()
+ }
  private fun requestTrash() {
   if(checkedCandidates.isEmpty()) { Toast.makeText(this,"선택된 중복 후보가 없습니다",Toast.LENGTH_SHORT).show(); return }
-  AlertDialog.Builder(this).setTitle("휴지통 이동 확인")
-   .setMessage("중복 후보 ${checkedCandidates.size}장을 휴지통으로 이동할까요? 각 그룹 첫 번째 사진은 보존합니다.")
-   .setNegativeButton("취소",null).setPositiveButton("계속") { _,_ ->
-    if(Build.VERSION.SDK_INT>=30) {
+  val count=checkedCandidates.size
+  val legacy=Build.VERSION.SDK_INT<30
+  AlertDialog.Builder(this).setTitle(if(legacy) "영구 삭제 확인 (Android 10)" else "휴지통 이동 확인")
+   .setMessage(if(legacy) "Android 10에서는 시스템 휴지통을 지원하지 않습니다. 선택한 중복 후보 ${count}장을 영구 삭제합니다. 복구할 수 없습니다. 각 그룹 첫 사진은 보존합니다. 계속할까요?" else "중복 후보 ${count}장을 시스템 휴지통으로 이동할까요? 각 그룹 첫 사진은 보존합니다.")
+   .setNegativeButton("취소",null).setPositiveButton(if(legacy) "영구 삭제" else "계속") { _,_ ->
+    if(!legacy) {
      try { startIntentSenderForResult(MediaStore.createTrashRequest(contentResolver,checkedCandidates.toList(),true).intentSender,2,null,0,0,0) }
      catch(e:Exception) { update("휴지통 이동 오류: ${e.message}") }
-    } else update("Android 10에서는 시스템 휴지통 이동 API가 지원되지 않습니다. 사진을 삭제하지 않았습니다.")
+    } else {
+     pendingDelete=checkedCandidates.toMutableList()
+     deletedCount=0; deleteFailed=0
+     continueLegacyDelete()
+    }
    }.show()
  }
 }

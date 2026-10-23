@@ -23,6 +23,7 @@ import java.security.MessageDigest
 
 class MainActivity : Activity() {
  private val selected = mutableListOf<Uri>()
+ private val selectedVideos = mutableListOf<Uri>()
  private var candidates = listOf<Uri>()
  private val checkedCandidates = linkedSetOf<Uri>()
  private var busy = false
@@ -35,6 +36,7 @@ class MainActivity : Activity() {
  private val teal = Color.rgb(0,156,157)
  private val blue = Color.rgb(15,105,245)
 
+ private fun lighten(color:Int):Int = Color.rgb((Color.red(color)+55).coerceAtMost(255),(Color.green(color)+55).coerceAtMost(255),(Color.blue(color)+55).coerceAtMost(255))
  private fun shape(color:Int, radius:Float=24f):GradientDrawable =
   GradientDrawable().apply { setColor(color); cornerRadius=radius }
  private fun text(value:String,size:Float,color:Int,bold:Boolean=false)=TextView(this).apply {
@@ -59,27 +61,42 @@ class MainActivity : Activity() {
   add(header,text("내 사진을 똑똑하게 정리하는 공간",14f,Color.rgb(185,224,229)),0)
   add(root,header,20)
   add(root,text("사진 정리 도구",19f,navy,true),8)
-  val actions=listOf<Pair<String,()->Unit>>(
-   "전체 사진" to { scanPhotos() },
-   "폴더 선택" to { chooseFolders() },
-   "사진 선택" to { pickPhotos() },
-   "선택 사진 보기" to { reviewSelected() },
-   "중복 분석" to { analyze() },
-   "대용량 사진" to { showLargePhotos() },
-   "스크린샷" to { selectScreenshots() },
-   "앱 관리" to { startActivity(Intent(Settings.ACTION_APPLICATION_SETTINGS)) }
+  val actions=listOf(
+   Triple("▣ 전체 사진",0,{ scanPhotos() }),
+   Triple("▤ 사진 폴더",0,{ chooseFolders() }),
+   Triple("▶ 동영상 폴더",1,{ chooseVideoFolders() }),
+   Triple("▧ 선택 사진 보기",0,{ reviewSelected() }),
+   Triple("⌕ 중복 분석",2,{ analyze() }),
+   Triple("▧ 대용량 사진",2,{ showLargePhotos() }),
+   Triple("▣ 스크린샷",0,{ selectScreenshots() }),
+   Triple("⚙ 앱 관리",3,{ startActivity(Intent(Settings.ACTION_APPLICATION_SETTINGS)) })
+  )
+  val colors=arrayOf(
+   intArrayOf(Color.rgb(19,111,244),Color.rgb(4,160,208)),
+   intArrayOf(Color.rgb(125,71,235),Color.rgb(188,71,217)),
+   intArrayOf(Color.rgb(237,139,28),Color.rgb(247,91,93)),
+   intArrayOf(Color.rgb(15,160,119),Color.rgb(10,127,161))
   )
   actions.chunked(2).forEach { pair ->
    val line=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
    pair.forEachIndexed { index,item ->
-    val tile=button(item.first,item.second).apply {
-     textSize=14f; minHeight=0; minimumHeight=0; setPadding(5,8,5,8)
+    val palette=colors[item.second]
+    val tile=TextView(this).apply {
+     text=item.first; textSize=14f; setTypeface(null,Typeface.BOLD)
+     setTextColor(Color.WHITE); gravity=android.view.Gravity.CENTER
+     setPadding(6,8,6,8)
+     background=GradientDrawable(GradientDrawable.Orientation.TL_BR,palette).apply {
+      cornerRadius=22f; setStroke(2,Color.argb(110,255,255,255))
+     }
+     elevation=12f; translationZ=3f
+     setShadowLayer(2f,1f,2f,Color.argb(70,0,0,0))
+     setOnClickListener { if(!busy) item.third() }
     }
-    line.addView(tile,LinearLayout.LayoutParams(0,54,1f).apply {
-     if(index==0) rightMargin=5 else leftMargin=5
+    line.addView(tile,LinearLayout.LayoutParams(0,64,1f).apply {
+     if(index==0) rightMargin=7 else leftMargin=7
     })
    }
-   add(root,line,8)
+   add(root,line,14)
   }
   val panel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(20,22,20,22); background=shape(Color.WHITE) }
   add(panel,text("작업 진행 상황",19f,navy,true),12)
@@ -97,9 +114,9 @@ class MainActivity : Activity() {
   add(root,panel,24)
   val bottom=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER; setPadding(0,10,0,10) }
   fun bottomAction(label:String,color:Int,action:()->Unit):TextView = TextView(this).apply {
-   text=label; textSize=19f; setTypeface(null,Typeface.BOLD)
+   text=label; textSize=23f; setTypeface(null,Typeface.BOLD)
    setTextColor(Color.WHITE); gravity=android.view.Gravity.CENTER
-   background=shape(color,30f); elevation=9f
+   background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(lighten(color),color)).apply { cornerRadius=32f; setStroke(2,Color.WHITE) }; elevation=14f
    setOnClickListener { action() }
   }
   val run=bottomAction("▶ 실행",Color.rgb(0,176,118)) { if(!busy) analyze() }
@@ -107,8 +124,8 @@ class MainActivity : Activity() {
    AlertDialog.Builder(this@MainActivity).setTitle("사진깔끔 종료").setMessage("앱을 종료하시겠습니까?")
     .setNegativeButton("취소",null).setPositiveButton("종료") { _,_ -> finishAffinity() }.show()
   }
-  bottom.addView(run,LinearLayout.LayoutParams(0,64,1f).apply { rightMargin=8 })
-  bottom.addView(exit,LinearLayout.LayoutParams(0,64,1f).apply { leftMargin=8 })
+  bottom.addView(run,LinearLayout.LayoutParams(0,82,1f).apply { rightMargin=8 })
+  bottom.addView(exit,LinearLayout.LayoutParams(0,82,1f).apply { leftMargin=8 })
   val shell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(Color.WHITE) }
   shell.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
   shell.addView(bottom,LinearLayout.LayoutParams(-1,-2).apply { leftMargin=16; rightMargin=16; bottomMargin=8 })
@@ -197,6 +214,41 @@ class MainActivity : Activity() {
       }.show()
     }
    } catch(e:Exception) { busy=false; update("폴더 검색 오류: ${e.message}") }
+  }.start()
+ }
+ private fun chooseVideoFolders() {
+  if(!permitted()) return
+  busy=true; update("동영상 폴더 검색 중...")
+  Thread {
+   try {
+    val base=MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+    val items=mutableListOf<Pair<Uri,String>>()
+    val columns=arrayOf(MediaStore.Video.Media._ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME)
+    contentResolver.query(base,columns,null,null,null)?.use { cursor ->
+     val id=cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+     val folder=cursor.getColumnIndexOrThrow(MediaStore.Video.Media.BUCKET_DISPLAY_NAME)
+     while(cursor.moveToNext()) items.add(ContentUris.withAppendedId(base,cursor.getLong(id)) to (cursor.getString(folder) ?: "기타"))
+    }
+    val groups=items.groupBy { it.second }.toSortedMap()
+    val names=groups.keys.toTypedArray()
+    val flags=BooleanArray(names.size)
+    runOnUiThread {
+     busy=false
+     if(names.isEmpty()) { update("동영상 폴더가 없습니다"); return@runOnUiThread }
+     update("동영상 폴더 ${names.size}개 검색 완료")
+     AlertDialog.Builder(this).setTitle("동영상 폴더 선택")
+      .setMultiChoiceItems(names.map { "${it} (${groups[it]?.size ?: 0}개)" }.toTypedArray(),flags) { _,i,v -> flags[i]=v }
+      .setNegativeButton("취소",null)
+      .setPositiveButton("선택 완료") { _,_ ->
+       selectedVideos.clear()
+       names.forEachIndexed { i,name -> if(flags[i]) selectedVideos.addAll(groups[name]!!.map { it.first }) }
+       details.text="선택된 동영상 ${selectedVideos.size}개 · 사진 ${selected.size}장"
+       resultBox.removeAllViews()
+       add(resultBox,text("동영상 ${selectedVideos.size}개 선택됨 · 삭제하지 않습니다.",14f,navy,true),8)
+       update("동영상 폴더 선택 완료",selectedVideos.size,selectedVideos.size)
+      }.show()
+    }
+   } catch(e:Exception) { busy=false; update("동영상 폴더 오류: ${e.message}") }
   }.start()
  }
  private fun analyze() {

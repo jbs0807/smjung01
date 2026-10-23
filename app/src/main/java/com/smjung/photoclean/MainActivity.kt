@@ -101,8 +101,8 @@ class MainActivity : Activity() {
    Triple("동영상 폴더",1,{ chooseVideoFolders() }),
    Triple("선택 사진 보기",0,{ reviewSelected() }),
    Triple("대용량 사진",2,{ showLargePhotos() }),
-   Triple("스크린샷",0,{ selectScreenshots() }),
-   Triple("앱 관리",3,{ startActivity(Intent(Settings.ACTION_APPLICATION_SETTINGS)) })
+   Triple("스크린샷",0,{ selectScreenshots() })
+
   )
   val colors=arrayOf(
    intArrayOf(Color.rgb(19,111,244),Color.rgb(4,160,208)),
@@ -167,10 +167,10 @@ class MainActivity : Activity() {
    setOnClickListener { action() }
   }
   runButton=bottomAction("실행",Color.rgb(0,176,118)) { if(!busy) { if(candidates.isNotEmpty()) requestTrash() else analyze() } }
-  runButton.visibility=View.GONE
+  runButton.visibility=View.VISIBLE
   stopButton=bottomAction("작업 중지",Color.rgb(237,65,89)) { stopWork() }
   bottom.addView(runButton,LinearLayout.LayoutParams(0,dp(60),1f).apply { rightMargin=dp(6) })
-  bottom.addView(stopButton,LinearLayout.LayoutParams(-1,dp(60)))
+  bottom.addView(stopButton,LinearLayout.LayoutParams(0,dp(60),1f).apply { leftMargin=dp(6) })
   val shell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(Color.WHITE); fitsSystemWindows=true }
   shell.addView(header,LinearLayout.LayoutParams(-1,-2))
   shell.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
@@ -327,7 +327,6 @@ class MainActivity : Activity() {
   selected.clear(); selected.addAll(items); candidates=emptyList(); checkedCandidates.clear()
   resultBox.removeAllViews(); details.text="선택한 사진 ${selected.size}장"
   update(message,selected.size,selected.size)
-  if(selected.isNotEmpty()) analyze()
  }
  private fun scanPhotos() {
   if(!permitted()) return

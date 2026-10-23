@@ -36,6 +36,7 @@ class MainActivity : Activity() {
  private val teal = Color.rgb(0,156,157)
  private val blue = Color.rgb(15,105,245)
 
+ private fun dp(value:Int):Int = (value*resources.displayMetrics.density+0.5f).toInt()
  private fun lighten(color:Int):Int = Color.rgb((Color.red(color)+55).coerceAtMost(255),(Color.green(color)+55).coerceAtMost(255),(Color.blue(color)+55).coerceAtMost(255))
  private fun shape(color:Int, radius:Float=24f):GradientDrawable =
   GradientDrawable().apply { setColor(color); cornerRadius=radius }
@@ -44,32 +45,33 @@ class MainActivity : Activity() {
  }
  private fun button(title:String, action:()->Unit)=Button(this).apply {
   text=title; isAllCaps=false; textSize=15f; setTextColor(Color.WHITE)
+  minHeight=dp(52); minimumHeight=dp(52); setPadding(dp(12),dp(10),dp(12),dp(10))
   background=GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,intArrayOf(blue,teal)).apply { cornerRadius=28f }; elevation=6f; setOnClickListener { if(!busy) action() }
  }
  private fun add(container:LinearLayout, view:View, bottom:Int=12) {
-  container.addView(view,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=bottom })
+  container.addView(view,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(bottom) })
  }
  override fun onCreate(savedInstanceState:Bundle?) {
   super.onCreate(savedInstanceState)
   window.statusBarColor=navy
   window.navigationBarColor=navy
   val scroll=ScrollView(this).apply { background=GradientDrawable(GradientDrawable.Orientation.TL_BR,intArrayOf(Color.rgb(222,239,255),Color.WHITE,Color.rgb(223,252,247))) }
-  val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(22,30,22,36) }
+  val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(16),dp(16),dp(20)) }
   scroll.addView(root)
-  val header=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(22,24,22,22); background=shape(navy) }
-  add(header,text("✦ 사진깔끔",29f,Color.WHITE,true),6)
-  add(header,text("내 사진을 똑똑하게 정리하는 공간",14f,Color.rgb(185,224,229)),0)
+  val header=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(16),dp(18),dp(16)); background=shape(navy,dp(16).toFloat()) }
+  add(header,text("사진깔끔",24f,Color.WHITE,true),6)
+  add(header,text("내 사진을 똑똑하게 정리하는 공간",12f,Color.rgb(185,224,229)),0)
   add(root,header,20)
-  add(root,text("사진 정리 도구",19f,navy,true),8)
+  add(root,text("사진 정리 도구",18f,navy,true),12)
   val actions=listOf(
-   Triple("▣ 전체 사진",0,{ scanPhotos() }),
-   Triple("▤ 사진 폴더",0,{ chooseFolders() }),
-   Triple("▶ 동영상 폴더",1,{ chooseVideoFolders() }),
-   Triple("▧ 선택 사진 보기",0,{ reviewSelected() }),
-   Triple("⌕ 중복 분석",2,{ analyze() }),
-   Triple("▧ 대용량 사진",2,{ showLargePhotos() }),
-   Triple("▣ 스크린샷",0,{ selectScreenshots() }),
-   Triple("⚙ 앱 관리",3,{ startActivity(Intent(Settings.ACTION_APPLICATION_SETTINGS)) })
+   Triple("전체 사진",0,{ scanPhotos() }),
+   Triple("사진 폴더",0,{ chooseFolders() }),
+   Triple("동영상 폴더",1,{ chooseVideoFolders() }),
+   Triple("선택 사진 보기",0,{ reviewSelected() }),
+   Triple("중복 분석",2,{ analyze() }),
+   Triple("대용량 사진",2,{ showLargePhotos() }),
+   Triple("스크린샷",0,{ selectScreenshots() }),
+   Triple("앱 관리",3,{ startActivity(Intent(Settings.ACTION_APPLICATION_SETTINGS)) })
   )
   val colors=arrayOf(
    intArrayOf(Color.rgb(19,111,244),Color.rgb(4,160,208)),
@@ -82,53 +84,56 @@ class MainActivity : Activity() {
    pair.forEachIndexed { index,item ->
     val palette=colors[item.second]
     val tile=TextView(this).apply {
-     text=item.first; textSize=14f; setTypeface(null,Typeface.BOLD)
+     text=item.first; textSize=16f; setTypeface(null,Typeface.BOLD)
      setTextColor(Color.WHITE); gravity=android.view.Gravity.CENTER
-     setPadding(6,8,6,8)
+     setPadding(dp(8),dp(10),dp(8),dp(10)); maxLines=2
+     setAutoSizeTextTypeUniformWithConfiguration(12,16,1,android.util.TypedValue.COMPLEX_UNIT_SP)
      background=GradientDrawable(GradientDrawable.Orientation.TL_BR,palette).apply {
-      cornerRadius=22f; setStroke(2,Color.argb(110,255,255,255))
+      cornerRadius=dp(14).toFloat(); setStroke(dp(1),Color.argb(110,255,255,255))
      }
-     elevation=12f; translationZ=3f
+     elevation=dp(3).toFloat()
      setShadowLayer(2f,1f,2f,Color.argb(70,0,0,0))
      setOnClickListener { if(!busy) item.third() }
     }
-    line.addView(tile,LinearLayout.LayoutParams(0,64,1f).apply {
-     if(index==0) rightMargin=7 else leftMargin=7
+    line.addView(tile,LinearLayout.LayoutParams(0,dp(56),1f).apply {
+     if(index==0) rightMargin=dp(6) else leftMargin=dp(6)
     })
    }
-   add(root,line,14)
+   add(root,line,12)
   }
-  val panel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(20,22,20,22); background=shape(Color.WHITE) }
-  add(panel,text("작업 진행 상황",19f,navy,true),12)
-  status=text("준비 완료 · 사진을 불러와 주세요",15f,navy,true)
+  val panel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(16),dp(16),dp(16)); background=shape(Color.WHITE,dp(16).toFloat()) }
+  add(panel,text("작업 진행 상황",18f,navy,true),12)
+  status=text("준비 완료 · 사진을 불러와 주세요",14f,navy,true)
   add(panel,status,8)
   details=text("선택한 사진 0장",13f,Color.DKGRAY)
-  add(panel,details,14)
+  add(panel,details,10)
   progress=ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { max=100; progress=0; progressTintList=android.content.res.ColorStateList.valueOf(teal) }
   add(panel,progress,8)
   percent=text("0%",14f,teal,true)
-  add(panel,percent,14)
+  add(panel,percent,8)
   resultBox=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
   add(panel,resultBox,12)
   add(panel,button("휴지통 이동 후보 확인") { requestTrash() },0)
   add(root,panel,24)
-  val bottom=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER; setPadding(0,10,0,10) }
+  val bottom=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER; setPadding(dp(16),dp(12),dp(16),dp(12)) }
   fun bottomAction(label:String,color:Int,action:()->Unit):TextView = TextView(this).apply {
-   text=label; textSize=23f; setTypeface(null,Typeface.BOLD)
+   text=label; textSize=20f; setTypeface(null,Typeface.BOLD)
    setTextColor(Color.WHITE); gravity=android.view.Gravity.CENTER
-   background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(lighten(color),color)).apply { cornerRadius=32f; setStroke(2,Color.WHITE) }; elevation=14f
+   setPadding(dp(12),dp(10),dp(12),dp(10)); maxLines=1
+   setAutoSizeTextTypeUniformWithConfiguration(16,20,1,android.util.TypedValue.COMPLEX_UNIT_SP)
+   background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(lighten(color),color)).apply { cornerRadius=dp(16).toFloat(); setStroke(dp(1),Color.WHITE) }; elevation=dp(4).toFloat()
    setOnClickListener { action() }
   }
-  val run=bottomAction("▶ 실행",Color.rgb(0,176,118)) { if(!busy) analyze() }
-  val exit=bottomAction("✕ 종료",Color.rgb(237,65,89)) {
+  val run=bottomAction("실행",Color.rgb(0,176,118)) { if(!busy) analyze() }
+  val exit=bottomAction("종료",Color.rgb(237,65,89)) {
    AlertDialog.Builder(this@MainActivity).setTitle("사진깔끔 종료").setMessage("앱을 종료하시겠습니까?")
     .setNegativeButton("취소",null).setPositiveButton("종료") { _,_ -> finishAffinity() }.show()
   }
-  bottom.addView(run,LinearLayout.LayoutParams(0,82,1f).apply { rightMargin=8 })
-  bottom.addView(exit,LinearLayout.LayoutParams(0,82,1f).apply { leftMargin=8 })
-  val shell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(Color.WHITE) }
+  bottom.addView(run,LinearLayout.LayoutParams(0,dp(60),1f).apply { rightMargin=dp(6) })
+  bottom.addView(exit,LinearLayout.LayoutParams(0,dp(60),1f).apply { leftMargin=dp(6) })
+  val shell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(Color.WHITE); fitsSystemWindows=true }
   shell.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
-  shell.addView(bottom,LinearLayout.LayoutParams(-1,-2).apply { leftMargin=16; rightMargin=16; bottomMargin=8 })
+  shell.addView(bottom,LinearLayout.LayoutParams(-1,-2))
   setContentView(shell)
  }
  private fun update(message:String,done:Int=0,total:Int=0) {

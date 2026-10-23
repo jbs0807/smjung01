@@ -96,13 +96,12 @@ class MainActivity : Activity() {
 
   add(root,text("사진 정리 도구",18f,navy,true),12)
   val actions=listOf(
-   Triple("전체 사진",0,{ scanPhotos() }),
-   Triple("사진 폴더",0,{ chooseFolders() }),
    Triple("동영상 폴더",1,{ chooseVideoFolders() }),
-   Triple("선택 사진 보기",0,{ reviewSelected() }),
+   Triple("전체 사진",0,{ scanPhotos() }),
    Triple("대용량 사진",2,{ showLargePhotos() }),
-   Triple("스크린샷",0,{ selectScreenshots() })
-
+   Triple("사진 폴더",0,{ chooseFolders() }),
+   Triple("스크린샷",0,{ selectScreenshots() }),
+   Triple("선택 사진 보기",0,{ reviewSelected() })
   )
   val colors=arrayOf(
    intArrayOf(Color.rgb(19,111,244),Color.rgb(4,160,208)),
@@ -478,41 +477,78 @@ class MainActivity : Activity() {
  private fun reviewSelected() {
   if(selected.isEmpty()) { Toast.makeText(this,"선택된 사진이 없습니다",Toast.LENGTH_SHORT).show(); return }
   val photos=selected.toList()
-  work("선택 사진 보기") { t ->
-   val shown=photos.take(100)
-   val previews=linkedMapOf<Uri,Bitmap?>()
-   shown.forEachIndexed { index,uri ->
-    previews[uri]=thumbnail(t,uri,300)
-    report(t,"선택 사진 미리보기 준비 중…",index+1,shown.size)
-   }
-   val complete:()->Unit={
-    update("선택 사진 미리보기 준비 완료",shown.size,shown.size)
-    val wrap=ScrollView(this)
-    val column=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(8),dp(8),dp(8),dp(8)) }
-    wrap.addView(column)
-    add(column,text("선택된 사진 ${photos.size}장 · 한 줄 2장씩 표시",16f,navy,true),12)
-    val side=maxOf(dp(100),(resources.displayMetrics.widthPixels-dp(72))/2)
-    shown.chunked(2).forEachIndexed { rowIndex,pair ->
-     val line=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
-     pair.forEachIndexed { colIndex,uri ->
-      val cell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(4,4,4,8); background=shape(Color.rgb(238,246,255),12f) }
-      val thumb=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setImageBitmap(previews[uri]) }
-      cell.addView(thumb,LinearLayout.LayoutParams(-1,side))
-      add(cell,text("사진 ${rowIndex*2+colIndex+1}",12f,navy,true),0)
-      cell.setOnClickListener {
-       try { startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri,"image/*"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }
-       catch(e:Exception) { Toast.makeText(this,"사진 열기 실패",Toast.LENGTH_SHORT).show() }
-      }
-      line.addView(cell,LinearLayout.LayoutParams(0,-2,1f).apply { if(colIndex==0) rightMargin=6 else leftMargin=6 })
+  val pageSize=20
+  val pageCount=(photos.size+pageSize-1)/pageSize
+  val wrap=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(8),dp(8),dp(8),dp(8)) }
+  val pageLabel=text("",15f,navy,true)
+  val gridScroll=ScrollView(this)
+  val column=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
+  gridScroll.addView(column)
+  val nav=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+  val previous=button("이전 페이지") {}
+  val next=button("다음 페이지") {}
+  nav.addView(previous,LinearLayout.LayoutParams(0,dp(48),1f).apply { rightMargin=dp(4) })
+  nav.addView(next,LinearLayout.LayoutParams(0,dp(48),1f).apply { leftMargin=dp(4) })
+  add(wrap,text("선택된 사진 ${photos.size}장 · 한 줄 2장씩 표시",16f,navy,true),6)
+  add(wrap,pageLabel,6)
+  wrap.addView(gridScroll,LinearLayout.LayoutParams(-1,0,1f))
+  add(wrap,nav,0)
+  val dialog=AlertDialog.Builder(this).setTitle("선택된 사진 확인").setView(wrap)
+   .setNegativeButton("닫기",null).setPositiveButton("중복 분석") { _,_ -> analyze() }.create()
+  var page=0
+  var previewTask:Task?=null
+  fun showPage(index:Int) {
+   previewTask?.let { it.cancelled=true; it.thread?.interrupt() }
+   page=index.coerceIn(0,pageCount-1)
+   val current=page
+   val offset=current*pageSize
+   val items=photos.drop(offset).take(pageSize)
+   pageLabel.text="${current+1} / ${pageCount} 페이지 · ${offset+1}~${offset+items.size} / ${photos.size}장"
+   previous.isEnabled=current>0
+   next.isEnabled=current<pageCount-1
+   column.removeAllViews()
+   gridScroll.scrollTo(0,0)
+   val side=maxOf(dp(100),(resources.displayMetrics.widthPixels-dp(72))/2)
+   val thumbs=mutableListOf<Pair<Uri,ImageView>>()
+   items.chunked(2).forEachIndexed { rowIndex,pair ->
+    val line=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+    pair.forEachIndexed { colIndex,uri ->
+     val cell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(4,4,4,8); background=shape(Color.rgb(238,246,255),12f) }
+     val thumb=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP }
+     thumbs.add(uri to thumb)
+     cell.addView(thumb,LinearLayout.LayoutParams(-1,side))
+     add(cell,text("사진 ${offset+rowIndex*2+colIndex+1}",12f,navy,true),0)
+     cell.setOnClickListener {
+      try { startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri,"image/*"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }
+      catch(e:Exception) { Toast.makeText(this,"사진 열기 실패",Toast.LENGTH_SHORT).show() }
      }
-     if(pair.size==1) line.addView(View(this),LinearLayout.LayoutParams(0,1,1f))
-     add(column,line,8)
+     line.addView(cell,LinearLayout.LayoutParams(0,-2,1f).apply { if(colIndex==0) rightMargin=6 else leftMargin=6 })
     }
-    if(photos.size>100) add(column,text("처음 100장만 표시합니다. 나머지 사진도 분석 대상에 포함됩니다.",13f,Color.DKGRAY),8)
-    AlertDialog.Builder(this).setTitle("선택된 사진 확인").setView(wrap)
-     .setNegativeButton("닫기",null).setPositiveButton("중복 분석") { _,_ -> analyze() }.show()
-   }; complete
+    if(pair.size==1) line.addView(View(this),LinearLayout.LayoutParams(0,1,1f))
+    add(column,line,8)
+   }
+   val t=Task("사진 페이지 미리보기"); previewTask=t
+   t.thread=Thread {
+    thumbs.forEachIndexed { i,(uri,view) ->
+     if(t.cancelled) return@Thread
+     val bitmap=try { thumbnail(t,uri,300) } catch(e:Exception) { null }
+     runOnUiThread {
+      if(previewTask===t && !t.cancelled && dialog.isShowing) {
+       view.setImageBitmap(bitmap)
+       pageLabel.text="${current+1} / ${pageCount} 페이지 · 미리보기 ${i+1}/${items.size}장"
+      } else bitmap?.recycle()
+     }
+    }
+   }.apply { start() }
   }
+  previous.setOnClickListener { showPage(page-1) }
+  next.setOnClickListener { showPage(page+1) }
+  dialog.setOnDismissListener { previewTask?.let { it.cancelled=true; it.thread?.interrupt() }; previewTask=null }
+  dialog.setOnShowListener {
+   dialog.window?.setLayout(-1,(resources.displayMetrics.heightPixels*0.82f).toInt())
+   showPage(0)
+  }
+  dialog.show()
  }
  private fun continueLegacyDelete() {
   if(Build.VERSION.SDK_INT>=30 || awaitingDeletePermission || !deletionRunning) return

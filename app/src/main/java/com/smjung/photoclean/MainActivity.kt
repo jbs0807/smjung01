@@ -1,99 +1,206 @@
 package com.smjung.photoclean
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
-import android.os.Bundle
+import android.content.ContentUris
 import android.content.Intent
-import android.provider.MediaStore
-import android.widget.*
+import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
-import android.Manifest
-import android.content.pm.PackageManager
-import android.content.ContentUris
-import android.database.Cursor
+import android.os.Bundle
+import android.provider.MediaStore
+import android.view.View
+import android.widget.*
 import java.security.MessageDigest
 
 class MainActivity : Activity() {
  private val selected = mutableListOf<Uri>()
- private var duplicateCandidates = listOf<Uri>()
+ private var candidates = listOf<Uri>()
+ private var busy = false
  private lateinit var status: TextView
- override fun onCreate(savedInstanceState: Bundle?) {
+ private lateinit var details: TextView
+ private lateinit var progress: ProgressBar
+ private lateinit var percent: TextView
+ private lateinit var resultBox: LinearLayout
+ private val navy = Color.rgb(18,35,65)
+ private val teal = Color.rgb(0,156,157)
+
+ private fun shape(color:Int, radius:Float=24f):GradientDrawable =
+  GradientDrawable().apply { setColor(color); cornerRadius=radius }
+ private fun text(value:String,size:Float,color:Int,bold:Boolean=false)=TextView(this).apply {
+  text=value; textSize=size; setTextColor(color); if(bold) setTypeface(null,Typeface.BOLD)
+ }
+ private fun button(title:String, action:()->Unit)=Button(this).apply {
+  text=title; isAllCaps=false; textSize=15f; setTextColor(Color.WHITE)
+  background=shape(navy,22f); setOnClickListener { if(!busy) action() }
+ }
+ private fun add(container:LinearLayout, view:View, bottom:Int=12) {
+  container.addView(view,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=bottom })
+ }
+ override fun onCreate(savedInstanceState:Bundle?) {
   super.onCreate(savedInstanceState)
-  val layout = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(32,48,32,24) }
-  layout.addView(TextView(this).apply { text="사진깔끔"; textSize=28f })
-  status=TextView(this).apply { text="사진을 선택하여 중복 후보를 검토하세요."; textSize=16f }
-  layout.addView(status)
-  layout.addView(Button(this).apply { text="휴대폰 사진 전체 검색"; setOnClickListener { scanPhotos() } })
-  layout.addView(Button(this).apply { text="사진 여러 장 선택"; setOnClickListener {
-   val intent=Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type="image/*"; addCategory(Intent.CATEGORY_OPENABLE); putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true) }
-   startActivityForResult(intent,1)
-  } })
-  layout.addView(Button(this).apply { text="완전 중복 분석"; setOnClickListener { analyze() } })
-  layout.addView(Button(this).apply { text="중복 후보 휴지통 이동"; setOnClickListener { requestTrash() } })
-  setContentView(layout)
+  window.statusBarColor=navy
+  window.navigationBarColor=navy
+  val scroll=ScrollView(this).apply { setBackgroundColor(Color.rgb(244,248,251)) }
+  val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(22,30,22,36) }
+  scroll.addView(root)
+  val header=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(22,24,22,22); background=shape(navy) }
+  add(header,text("✦ 사진깔끔",29f,Color.WHITE,true),6)
+  add(header,text("내 사진을 똑똑하게 정리하는 공간",14f,Color.rgb(185,224,229)),0)
+  add(root,header,20)
+  add(root,text("사진 정리 도구",20f,navy,true),12)
+  add(root,button("▣  휴대폰 전체 사진 불러오기") { scanPhotos() })
+  add(root,button("▤  폴더별 사진 선택") { chooseFolders() })
+  add(root,button("＋  사진 직접 선택") { pickPhotos() })
+  add(root,button("⌕  완전 중복 분석 시작") { analyze() },20)
+  val panel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(20,22,20,22); background=shape(Color.WHITE) }
+  add(panel,text("작업 진행 상황",19f,navy,true),12)
+  status=text("준비 완료 · 사진을 불러와 주세요",15f,navy,true)
+  add(panel,status,8)
+  details=text("선택한 사진 0장",13f,Color.DKGRAY)
+  add(panel,details,14)
+  progress=ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { max=100; progress=0; progressTintList=android.content.res.ColorStateList.valueOf(teal) }
+  add(panel,progress,8)
+  percent=text("0%",14f,teal,true)
+  add(panel,percent,14)
+  resultBox=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
+  add(panel,resultBox,12)
+  add(panel,button("휴지통 이동 후보 확인") { requestTrash() },0)
+  add(root,panel)
+  setContentView(scroll)
+ }
+ private fun update(message:String,done:Int=0,total:Int=0) {
+  runOnUiThread {
+   status.text=message
+   progress.progress=if(total>0) (done*100L/total).toInt() else 0
+   percent.text=if(total>0) "${progress.progress}% · ${done}/${total}장" else "0%"
+  }
+ }
+ private fun pickPhotos() {
+  val i=Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type="image/*"; addCategory(Intent.CATEGORY_OPENABLE); putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true) }
+  startActivityForResult(i,1)
  }
  override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
   super.onActivityResult(requestCode,resultCode,data)
   if(requestCode==1 && resultCode==RESULT_OK) {
-   selected.clear(); duplicateCandidates=emptyList()
-   data?.clipData?.let { clip -> for(i in 0 until clip.itemCount) selected.add(clip.getItemAt(i).uri) }
-   data?.data?.let { if(!selected.contains(it)) selected.add(it) }
-   status.text="${selected.size}장 선택됨"
+   val found=mutableListOf<Uri>()
+   data?.clipData?.let { c -> for(i in 0 until c.itemCount) found.add(c.getItemAt(i).uri) }
+   data?.data?.let { if(!found.contains(it)) found.add(it) }
+   selected.clear(); selected.addAll(found); candidates=emptyList()
+   details.text="선택한 사진 ${found.size}장"
+   update("사진 선택 완료",found.size,found.size)
+   resultBox.removeAllViews()
   }
  }
- private fun scanPhotos() {
-  val permission = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
-  if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) {
-   requestPermissions(arrayOf(permission), 10)
-   return
-  }
-  Thread {
-   try {
-    val found = mutableListOf<Uri>()
-    val base = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-    contentResolver.query(base, arrayOf(MediaStore.Images.Media._ID), null, null, null)?.use { cursor ->
-     val idx = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-     while(cursor.moveToNext()) found.add(ContentUris.withAppendedId(base,cursor.getLong(idx)))
-    }
-    runOnUiThread {
-     selected.clear(); selected.addAll(found); duplicateCandidates=emptyList()
-     status.text="${found.size}장 검색 완료. '완전 중복 분석'을 누르세요."
-    }
-   } catch(e:Exception) { runOnUiThread { status.text="사진 검색 실패: ${e.message}" } }
-  }.start()
+ private fun permitted():Boolean {
+  val permission=if(Build.VERSION.SDK_INT>=33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
+  if(checkSelfPermission(permission)!=PackageManager.PERMISSION_GRANTED) { requestPermissions(arrayOf(permission),10); return false }
+  return true
  }
  override fun onRequestPermissionsResult(requestCode:Int,permissions:Array<out String>,grantResults:IntArray) {
   super.onRequestPermissionsResult(requestCode,permissions,grantResults)
-  if(requestCode==10) {
-   if(grantResults.isNotEmpty() && grantResults[0]==PackageManager.PERMISSION_GRANTED) scanPhotos()
-   else status.text="사진 접근 권한이 필요합니다. 설정에서 사진 접근을 허용하세요."
+  if(requestCode==10) update(if(grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED) "권한 허용됨 · 다시 검색을 눌러주세요" else "사진 접근 권한이 필요합니다")
+ }
+ private fun loadPhotos():List<Pair<Uri,String>> {
+  val items=mutableListOf<Pair<Uri,String>>()
+  val base=MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+  val projection=arrayOf(MediaStore.Images.Media._ID,MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+  contentResolver.query(base,projection,null,null,null)?.use { cursor ->
+   val id=cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+   val bucket=cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+   while(cursor.moveToNext()) items.add(ContentUris.withAppendedId(base,cursor.getLong(id)) to (cursor.getString(bucket) ?: "기타"))
   }
+  return items
+ }
+ private fun scanPhotos() {
+  if(!permitted()) return
+  busy=true; update("휴대폰 사진 목록 읽는 중...")
+  Thread {
+   try {
+    val all=loadPhotos()
+    runOnUiThread {
+     selected.clear(); selected.addAll(all.map { it.first }); candidates=emptyList()
+     details.text="전체 사진 ${selected.size}장"
+     resultBox.removeAllViews()
+     busy=false; update("전체 사진 불러오기 완료",all.size,all.size)
+    }
+   } catch(e:Exception) { busy=false; update("검색 오류: ${e.message}") }
+  }.start()
+ }
+ private fun chooseFolders() {
+  if(!permitted()) return
+  busy=true; update("폴더 목록 불러오는 중...")
+  Thread {
+   try {
+    val all=loadPhotos()
+    val folders=all.groupBy { it.second }.toSortedMap()
+    val names=folders.keys.toTypedArray()
+    val checked=BooleanArray(names.size)
+    runOnUiThread {
+     busy=false
+     if(names.isEmpty()) { update("사진 폴더가 없습니다"); return@runOnUiThread }
+     update("${names.size}개 폴더 발견")
+     AlertDialog.Builder(this).setTitle("분석할 폴더 선택")
+      .setMultiChoiceItems(names.map { "${it} (${folders[it]?.size ?: 0}장)" }.toTypedArray(),checked) { _,which,value -> checked[which]=value }
+      .setNegativeButton("취소",null)
+      .setPositiveButton("선택 완료") { _,_ ->
+       selected.clear()
+       names.forEachIndexed { index,name -> if(checked[index]) selected.addAll(folders[name]!!.map { it.first }) }
+       candidates=emptyList(); resultBox.removeAllViews()
+       details.text="선택한 폴더 ${checked.count { it }}개 · 사진 ${selected.size}장"
+       update("폴더 선택 완료",selected.size,selected.size)
+      }.show()
+    }
+   } catch(e:Exception) { busy=false; update("폴더 검색 오류: ${e.message}") }
+  }.start()
  }
  private fun analyze() {
-  if(selected.isEmpty()) { status.text="먼저 '휴대폰 사진 전체 검색'을 실행하세요."; return }
-  status.text="중복 분석 중..."
-  Thread { analyzeSelected() }.start()
- }
- private fun analyzeSelected() {
-  val groups=selected.groupBy { uri ->
-   try { contentResolver.openInputStream(uri)?.use { stream ->
-    val md=MessageDigest.getInstance("SHA-256")
-    val buffer=ByteArray(8192)
-    while(true) { val n=stream.read(buffer); if(n<0) break; md.update(buffer,0,n) }
-    md.digest().joinToString("") { "%02x".format(it) }
-   } ?: uri.toString() } catch(e:Exception) { uri.toString() }
-  }.values.filter { it.size>1 }
-  duplicateCandidates=groups.flatMap { it.drop(1) }
-  runOnUiThread { status.text="완전 중복 ${groups.size}그룹, 휴지통 후보 ${duplicateCandidates.size}장. 각 그룹 첫 번째 사진은 보존합니다." }
+  if(selected.isEmpty()) { update("먼저 사진이나 폴더를 선택하세요"); return }
+  val items=selected.toList()
+  busy=true; candidates=emptyList(); resultBox.removeAllViews()
+  update("중복 사진 비교 시작",0,items.size)
+  Thread {
+   val hashes=linkedMapOf<String,MutableList<Uri>>()
+   var errors=0
+   items.forEachIndexed { index,uri ->
+    try {
+     val md=MessageDigest.getInstance("SHA-256")
+     contentResolver.openInputStream(uri)?.use { stream ->
+      val buffer=ByteArray(65536)
+      while(true) { val n=stream.read(buffer); if(n<0) break; md.update(buffer,0,n) }
+      val hash=md.digest().joinToString("") { "%02x".format(it) }
+      hashes.getOrPut(hash) { mutableListOf() }.add(uri)
+     } ?: run { errors++ }
+    } catch(e:Exception) { errors++ }
+    if(index%5==0 || index==items.lastIndex) update("사진 비교 중...",index+1,items.size)
+   }
+   val groups=hashes.values.filter { it.size>1 }
+   val found=groups.flatMap { it.drop(1) }
+   runOnUiThread {
+    candidates=found; busy=false
+    update("분석 완료 · 중복 ${groups.size}그룹",items.size,items.size)
+    details.text="검사 ${items.size}장 · 중복 후보 ${found.size}장 · 읽기 실패 ${errors}장"
+    resultBox.removeAllViews()
+    add(resultBox,text(if(found.isEmpty()) "중복된 사진이 없습니다." else "중복 후보 ${found.size}장 발견 · 각 그룹 첫 사진은 보존",15f,navy,true),8)
+    groups.take(30).forEachIndexed { index,group ->
+     add(resultBox,text("${index+1}그룹 · ${group.size}장 · 후보 ${group.size-1}장",13f,Color.DKGRAY),4)
+    }
+   }
+  }.start()
  }
  private fun requestTrash() {
-  if(duplicateCandidates.isEmpty()) { Toast.makeText(this,"중복 분석 후 후보를 확인하세요",Toast.LENGTH_SHORT).show(); return }
-  AlertDialog.Builder(this).setTitle("휴지통 이동 확인").setMessage("완전 중복으로 판정된 ${duplicateCandidates.size}장을 휴지통으로 이동하시겠습니까? 각 그룹의 첫 사진은 남습니다.").setNegativeButton("취소",null).setPositiveButton("이동 요청") { _,_ ->
-   if(Build.VERSION.SDK_INT>=30) {
-    try { startIntentSenderForResult(MediaStore.createTrashRequest(contentResolver,duplicateCandidates,true).intentSender,2,null,0,0,0) }
-    catch(e:Exception) { status.text="휴지통 이동 불가: ${e.message}" }
-   } else status.text="이 기기의 Android 버전에서는 이 방식의 휴지통 이동을 지원하지 않습니다."
-  }.show()
+  if(candidates.isEmpty()) { Toast.makeText(this,"중복 분석 후 후보를 확인하세요",Toast.LENGTH_SHORT).show(); return }
+  AlertDialog.Builder(this).setTitle("휴지통 이동 확인")
+   .setMessage("중복 후보 ${candidates.size}장을 휴지통으로 이동할까요? 각 그룹 첫 번째 사진은 보존합니다.")
+   .setNegativeButton("취소",null).setPositiveButton("계속") { _,_ ->
+    if(Build.VERSION.SDK_INT>=30) {
+     try { startIntentSenderForResult(MediaStore.createTrashRequest(contentResolver,candidates,true).intentSender,2,null,0,0,0) }
+     catch(e:Exception) { update("휴지통 이동 오류: ${e.message}") }
+    } else update("Android 10에서는 시스템 휴지통 이동 API가 지원되지 않습니다. 사진을 삭제하지 않았습니다.")
+   }.show()
  }
 }

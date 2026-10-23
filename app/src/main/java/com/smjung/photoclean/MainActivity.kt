@@ -58,15 +58,29 @@ class MainActivity : Activity() {
   add(header,text("✦ 사진깔끔",29f,Color.WHITE,true),6)
   add(header,text("내 사진을 똑똑하게 정리하는 공간",14f,Color.rgb(185,224,229)),0)
   add(root,header,20)
-  add(root,text("사진 정리 도구",20f,navy,true),12)
-  add(root,button("▣  휴대폰 전체 사진 불러오기") { scanPhotos() })
-  add(root,button("▤  폴더별 사진 선택") { chooseFolders() })
-  add(root,button("＋  사진 직접 선택") { pickPhotos() })
-  add(root,button("▧  선택된 사진 확인") { reviewSelected() })
-  add(root,button("⌕  완전 중복 분석 시작") { analyze() })
-  add(root,button("▧  대용량 사진 찾기 (10MB 이상)") { showLargePhotos() })
-  add(root,button("▣  스크린샷만 선택") { selectScreenshots() })
-  add(root,button("⚙  설치 앱 관리 열기") { startActivity(Intent(Settings.ACTION_APPLICATION_SETTINGS)) },20)
+  add(root,text("사진 정리 도구",19f,navy,true),8)
+  val actions=listOf<Pair<String,()->Unit>>(
+   "전체 사진" to { scanPhotos() },
+   "폴더 선택" to { chooseFolders() },
+   "사진 선택" to { pickPhotos() },
+   "선택 사진 보기" to { reviewSelected() },
+   "중복 분석" to { analyze() },
+   "대용량 사진" to { showLargePhotos() },
+   "스크린샷" to { selectScreenshots() },
+   "앱 관리" to { startActivity(Intent(Settings.ACTION_APPLICATION_SETTINGS)) }
+  )
+  actions.chunked(2).forEach { pair ->
+   val line=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+   pair.forEachIndexed { index,item ->
+    val tile=button(item.first,item.second).apply {
+     textSize=14f; minHeight=0; minimumHeight=0; setPadding(5,8,5,8)
+    }
+    line.addView(tile,LinearLayout.LayoutParams(0,54,1f).apply {
+     if(index==0) rightMargin=5 else leftMargin=5
+    })
+   }
+   add(root,line,8)
+  }
   val panel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(20,22,20,22); background=shape(Color.WHITE) }
   add(panel,text("작업 진행 상황",19f,navy,true),12)
   status=text("준비 완료 · 사진을 불러와 주세요",15f,navy,true)
@@ -291,29 +305,38 @@ class MainActivity : Activity() {
   if(selected.isEmpty()) { Toast.makeText(this,"선택된 사진이 없습니다",Toast.LENGTH_SHORT).show(); return }
   val photos=selected.toList()
   val wrap=ScrollView(this)
-  val column=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(16,12,16,12) }
+  val column=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(12,12,12,12) }
   wrap.addView(column)
-  add(column,text("선택된 사진 ${photos.size}장 · 최대 100장 미리보기",16f,navy,true),12)
-  photos.take(100).forEachIndexed { index,uri ->
-   val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER_VERTICAL }
-   val thumb=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP }
-   row.addView(thumb,LinearLayout.LayoutParams(88,88).apply { rightMargin=12 })
-   try {
-    val opts=BitmapFactory.Options().apply { inSampleSize=8 }
-    contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it,null,opts) }?.let { thumb.setImageBitmap(it) }
-   } catch(_:Exception) {}
-   val name=uri.lastPathSegment?.takeLast(36) ?: "사진"
-   val label=text("${index+1}. ${name}",13f,navy)
-   row.addView(label,LinearLayout.LayoutParams(0,-2,1f))
-   row.setOnClickListener {
-    try { startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri,"image/*"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }
-    catch(e:Exception) { Toast.makeText(this,"사진 열기 실패",Toast.LENGTH_SHORT).show() }
+  add(column,text("선택된 사진 ${photos.size}장 · 한 줄 2장씩 표시",16f,navy,true),12)
+  val width=(resources.displayMetrics.widthPixels-100)/2
+  val side=maxOf(110,width)
+  photos.take(100).chunked(2).forEachIndexed { rowIndex,pair ->
+   val line=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+   pair.forEachIndexed { colIndex,uri ->
+    val cell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(4,4,4,8); background=shape(Color.rgb(238,246,255),12f) }
+    val thumb=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setBackgroundColor(Color.rgb(220,232,245)) }
+    cell.addView(thumb,LinearLayout.LayoutParams(-1,side))
+    try {
+     val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
+     contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it,null,bounds) }
+     val sample=maxOf(1,maxOf(bounds.outWidth,bounds.outHeight)/360)
+     val options=BitmapFactory.Options().apply { inSampleSize=sample }
+     contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it,null,options) }?.let { thumb.setImageBitmap(it) }
+    } catch(_:Exception) {}
+    add(cell,text("사진 ${rowIndex*2+colIndex+1}",12f,navy,true),0)
+    cell.setOnClickListener {
+     try { startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri,"image/*"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }
+     catch(e:Exception) { Toast.makeText(this,"사진 열기 실패",Toast.LENGTH_SHORT).show() }
+    }
+    line.addView(cell,LinearLayout.LayoutParams(0,-2,1f).apply { if(colIndex==0) rightMargin=6 else leftMargin=6 })
    }
-   add(column,row,8)
+   if(pair.size==1) line.addView(View(this),LinearLayout.LayoutParams(0,1,1f))
+   add(column,line,8)
   }
+  if(photos.size>100) add(column,text("처음 100장만 표시합니다. 나머지 사진도 분석 대상에 포함됩니다.",13f,Color.DKGRAY),8)
   AlertDialog.Builder(this).setTitle("선택된 사진 확인").setView(wrap)
    .setNegativeButton("닫기",null)
-   .setPositiveButton("중복 분석") { _,_ -> analyze() }.show()
+   .setPositiveButton("중복 분석") { _,_ -> if(!busy) analyze() }.show()
  }
  private fun requestTrash() {
   if(checkedCandidates.isEmpty()) { Toast.makeText(this,"선택된 중복 후보가 없습니다",Toast.LENGTH_SHORT).show(); return }

@@ -154,8 +154,8 @@ class MainActivity : Activity() {
   add(panel,percent,8)
   resultBox=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
   add(root,resultBox,12)
-  trashButton=button("휴지통 이동 후보 확인") { requestTrash() }
-  add(root,trashButton,12)
+  trashButton=button("삭제") { requestTrash() }
+  trashButton.visibility=View.GONE
   val bottom=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER; setPadding(dp(16),dp(12),dp(16),dp(12)) }
   fun bottomAction(label:String,color:Int,action:()->Unit):TextView = TextView(this).apply {
    text=label; textSize=20f; setTypeface(null,Typeface.BOLD)
@@ -165,7 +165,7 @@ class MainActivity : Activity() {
    background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(lighten(color),color)).apply { cornerRadius=dp(16).toFloat(); setStroke(dp(1),Color.WHITE) }; elevation=dp(4).toFloat()
    setOnClickListener { action() }
   }
-  runButton=bottomAction("실행",Color.rgb(0,176,118)) { if(!busy) { lastAction="중복 분석"; analyze() } }
+  runButton=bottomAction("실행",Color.rgb(0,176,118)) { if(!busy) { if(candidates.isNotEmpty()) requestTrash() else { lastAction="중복 분석"; analyze() } } }
   stopButton=bottomAction("작업 중지",Color.rgb(237,65,89)) { stopWork() }
   bottom.addView(runButton,LinearLayout.LayoutParams(0,dp(60),1f).apply { rightMargin=dp(6) })
   bottom.addView(stopButton,LinearLayout.LayoutParams(0,dp(60),1f).apply { leftMargin=dp(6) })
@@ -190,7 +190,7 @@ class MainActivity : Activity() {
    runButton.isEnabled=!busy
    val runColor=if(busy) Color.rgb(210,100,0) else Color.rgb(0,176,118)
    runButton.background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(lighten(runColor),runColor)).apply { cornerRadius=dp(16).toFloat(); setStroke(dp(1),Color.WHITE) }
-   runButton.text=if(busy) "작업 중" else "실행"
+   runButton.text=if(busy) "작업 중" else if(candidates.isNotEmpty()) "선택 사진 삭제" else "실행"
    stopButton.isEnabled=busy && task?.cancelled==false
    stopButton.alpha=if(stopButton.isEnabled) 1f else 0.4f
    stopButton.text=if(task?.cancelled==true) "중지 중…" else "작업 중지"
@@ -413,6 +413,7 @@ class MainActivity : Activity() {
     percent.append("\n중복 사진 ${t.duplicates}장 · ${t.groups}그룹 (보존 사진 제외)")
     details.text="검사 ${items.size}장 · 중복 ${t.duplicates}장 · 읽기 실패 ${t.errors}장"
     renderResults(shown,previews,t.duplicates)
+    refreshControls()
     pageScroll.post { pageScroll.smoothScrollTo(0,resultBox.top) }
    }; complete
   }
@@ -428,7 +429,7 @@ class MainActivity : Activity() {
     val preview=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setImageBitmap(previews[uri]) }
     line.addView(preview,LinearLayout.LayoutParams(dp(64),dp(64)))
     val check=CheckBox(this).apply {
-     text=if(i==0) "원본 보존 (선택 불가)" else "중복 후보 · 휴지통 선택"
+     text=if(i==0) "원본 보존 (선택 불가)" else "중복됨 · 삭제대상"
      isEnabled=i!=0; isChecked=i!=0
      if(i!=0) checkedCandidates.add(uri)
      setOnCheckedChangeListener { _,value -> if(value) checkedCandidates.add(uri) else checkedCandidates.remove(uri) }

@@ -84,7 +84,7 @@ class MainActivity : Activity() {
   scroll.addView(root)
   val header=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(16),dp(18),dp(16)); background=shape(navy,dp(16).toFloat()) }
   val titleRow=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER_VERTICAL }
-  titleRow.addView(text("사진깔끔",24f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f))
+  titleRow.addView(text("중복사진 깔끔 정리 툴",20f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f))
   val close=TextView(this).apply {
    text="×"; textSize=28f; setTextColor(Color.WHITE); gravity=android.view.Gravity.CENTER
    contentDescription="앱 종료"; background=shape(Color.rgb(210,48,66),dp(4).toFloat())
@@ -192,7 +192,7 @@ class MainActivity : Activity() {
    runButton.isEnabled=!busy
    val runColor=if(busy) Color.rgb(210,100,0) else Color.rgb(0,176,118)
    runButton.background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(lighten(runColor),runColor)).apply { cornerRadius=dp(16).toFloat(); setStroke(dp(1),Color.WHITE) }
-   runButton.text=if(busy) "작업 중" else if(candidates.isNotEmpty()) "선택 사진 삭제" else "실행"
+   runButton.text=if(busy) "작업 중" else "실행"
    stopButton.isEnabled=busy && task?.cancelled==false
    stopButton.alpha=if(stopButton.isEnabled) 1f else 0.4f
    stopButton.text=if(task?.cancelled==true) "중지 중…" else "작업 중지"
@@ -258,7 +258,7 @@ class MainActivity : Activity() {
   task=null; busy=false; refreshControls()
  }
  private fun confirmExit() {
-  AlertDialog.Builder(this).setTitle("사진깔끔 종료")
+  AlertDialog.Builder(this).setTitle("중복사진 깔끔 정리 툴 종료")
    .setMessage(if(busy) "진행 중인 작업을 중지하고 종료할까요?" else "앱을 종료하시겠습니까?")
    .setNegativeButton("취소",null).setPositiveButton("종료") { _,_ -> stopWork(); finishAffinity() }.show()
  }
@@ -543,20 +543,18 @@ class MainActivity : Activity() {
   Toast.makeText(this,"삭제 ${deletedCount}장, 실패 ${deleteFailed}장",Toast.LENGTH_LONG).show()
  }
  private fun requestTrash() {
-  if(checkedCandidates.isEmpty()) { Toast.makeText(this,"선택된 중복 후보가 없습니다",Toast.LENGTH_SHORT).show(); return }
+  if(checkedCandidates.isEmpty()) { Toast.makeText(this,"선택된 삭제대상이 없습니다",Toast.LENGTH_SHORT).show(); return }
   val count=checkedCandidates.size
   val legacy=Build.VERSION.SDK_INT<30
-  AlertDialog.Builder(this).setTitle(if(legacy) "영구 삭제 확인 (Android 10)" else "휴지통 이동 확인")
-   .setMessage(if(legacy) "Android 10에서는 시스템 휴지통을 지원하지 않습니다. 선택한 중복 후보 ${count}장을 영구 삭제합니다. 복구할 수 없습니다. 각 그룹 첫 사진은 보존합니다. 계속할까요?" else "중복 후보 ${count}장을 시스템 휴지통으로 이동할까요? 각 그룹 첫 사진은 보존합니다.")
-   .setNegativeButton("취소",null).setPositiveButton(if(legacy) "영구 삭제" else "계속") { _,_ ->
-    if(!legacy) {
-     try { startIntentSenderForResult(MediaStore.createTrashRequest(contentResolver,checkedCandidates.toList(),true).intentSender,2,null,0,0,0) }
-     catch(e:Exception) { update("휴지통 이동 오류: ${e.message}") }
-    } else {
-     pendingDelete=checkedCandidates.toMutableList()
-     deletedCount=0; deleteFailed=0; deleteTotal=pendingDelete.size; deletionRunning=true
-     continueLegacyDelete()
-    }
-   }.show()
+  // 실행 버튼은 앱 자체의 재확인 창을 띄우지 않습니다.
+  // Android가 요구하는 시스템 권한 승인 창은 생략할 수 없습니다.
+  if(!legacy) {
+   try { startIntentSenderForResult(MediaStore.createTrashRequest(contentResolver,checkedCandidates.toList(),true).intentSender,2,null,0,0,0) }
+   catch(e:Exception) { update("휴지통 이동 오류: ${e.message}") }
+  } else {
+   pendingDelete=checkedCandidates.toMutableList()
+   deletedCount=0; deleteFailed=0; deleteTotal=pendingDelete.size; deletionRunning=true
+   continueLegacyDelete()
+  }
  }
 }

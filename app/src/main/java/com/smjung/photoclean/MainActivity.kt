@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.BitmapFactory
 import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.provider.Settings
 import android.graphics.Typeface
 import android.graphics.drawable.StateListDrawable
@@ -353,7 +354,8 @@ class MainActivity : Activity() {
       if(video) {
        selectedVideos.clear(); selectedVideos.addAll(chosen)
        details.text="선택된 동영상 ${chosen.size}개 · 사진 ${selected.size}장"
-       update("동영상 선택 완료 · 실행은 사진 중복 분석입니다",chosen.size,chosen.size)
+       update("동영상 선택 완료",chosen.size,chosen.size)
+       reviewMedia(selectedVideos.toList(),true,"동영상 폴더 보기")
       } else selectPhotos(chosen,"사진 폴더 선택 완료")
      }.show()
    }; complete
@@ -451,7 +453,7 @@ class MainActivity : Activity() {
   if(!permitted()) return
   work("스크린샷") { t ->
    val found=loadMedia(t).filter { it.second.contains("screenshot",true) || it.second.contains("스크린샷",true) }.map { it.first }
-   val complete:()->Unit={ selectPhotos(found,"스크린샷 선택 완료") }; complete
+   val complete:()->Unit={ selectPhotos(found,"스크린샷 선택 완료"); reviewMedia(found,false,"스크린샷 보기") }; complete
   }
  }
  private fun showLargePhotos() {
@@ -469,14 +471,13 @@ class MainActivity : Activity() {
    }
    val complete:()->Unit={
     selectPhotos(found.map { it.first },"10MB 이상 사진 검색 완료")
-    found.take(40).forEach { item -> add(resultBox,text("사진 · %.1f MB".format(item.second/1048576.0),14f,navy),6) }
-    add(resultBox,text("10MB 이상 사진 ${found.size}장 선택됨 · 실행으로 중복을 분석할 수 있습니다.",14f,navy),8)
+    reviewMedia(found.map { it.first },false,"대용량 사진 보기")
    }; complete
   }
  }
- private fun reviewSelected() {
-  if(selected.isEmpty()) { Toast.makeText(this,"선택된 사진이 없습니다",Toast.LENGTH_SHORT).show(); return }
-  val photos=selected.toList()
+ private fun reviewSelected() = reviewMedia(selected.toList(),false,"선택된 사진 확인")
+ private fun reviewMedia(photos:List<Uri>,video:Boolean,title:String) {
+  if(photos.isEmpty()) { Toast.makeText(this,"표시할 항목이 없습니다",Toast.LENGTH_SHORT).show(); return }
   val pageSize=20
   val pageCount=(photos.size+pageSize-1)/pageSize
   val wrap=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(8),dp(8),dp(8),dp(8)) }
@@ -489,12 +490,12 @@ class MainActivity : Activity() {
   val next=button("다음 페이지") {}
   nav.addView(previous,LinearLayout.LayoutParams(0,dp(48),1f).apply { rightMargin=dp(4) })
   nav.addView(next,LinearLayout.LayoutParams(0,dp(48),1f).apply { leftMargin=dp(4) })
-  add(wrap,text("선택된 사진 ${photos.size}장 · 한 줄 2장씩 표시",16f,navy,true),6)
+  add(wrap,text("${if(video) "동영상" else "사진"} ${photos.size}개 · 한 줄 2개씩 표시",16f,navy,true),6)
   add(wrap,pageLabel,6)
   wrap.addView(gridScroll,LinearLayout.LayoutParams(-1,0,1f))
   add(wrap,nav,0)
-  val dialog=AlertDialog.Builder(this).setTitle("선택된 사진 확인").setView(wrap)
-   .setNegativeButton("닫기",null).setPositiveButton("중복 분석") { _,_ -> analyze() }.create()
+  val dialog=AlertDialog.Builder(this).setTitle(title).setView(wrap)
+   .setNegativeButton("닫기",null).setPositiveButton(if(video) "확인" else "중복 분석") { _,_ -> if(!video) analyze() }.create()
   var page=0
   var previewTask:Task?=null
   fun showPage(index:Int) {
@@ -517,10 +518,10 @@ class MainActivity : Activity() {
      val thumb=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP }
      thumbs.add(uri to thumb)
      cell.addView(thumb,LinearLayout.LayoutParams(-1,side))
-     add(cell,text("사진 ${offset+rowIndex*2+colIndex+1}",12f,navy,true),0)
+     add(cell,text("${if(video) "▶ 동영상" else "사진"} ${offset+rowIndex*2+colIndex+1}",12f,navy,true),0)
      cell.setOnClickListener {
-      try { startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri,"image/*"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }
-      catch(e:Exception) { Toast.makeText(this,"사진 열기 실패",Toast.LENGTH_SHORT).show() }
+      try { startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri,if(video) "video/*" else "image/*"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }
+      catch(e:Exception) { Toast.makeText(this,"미디어 열기 실패",Toast.LENGTH_SHORT).show() }
      }
      line.addView(cell,LinearLayout.LayoutParams(0,-2,1f).apply { if(colIndex==0) rightMargin=6 else leftMargin=6 })
     }
@@ -531,7 +532,13 @@ class MainActivity : Activity() {
    t.thread=Thread {
     thumbs.forEachIndexed { i,(uri,view) ->
      if(t.cancelled) return@Thread
-     val bitmap=try { thumbnail(t,uri,300) } catch(e:Exception) { null }
+     val bitmap=try {
+      if(video) {
+       val retriever=MediaMetadataRetriever()
+       try { retriever.setDataSource(this@MainActivity,uri); checkTask(t); retriever.getFrameAtTime(0,MediaMetadataRetriever.OPTION_CLOSEST_SYNC) }
+       finally { retriever.release() }
+      } else thumbnail(t,uri,300)
+     } catch(e:Exception) { null }
      runOnUiThread {
       if(previewTask===t && !t.cancelled && dialog.isShowing) {
        view.setImageBitmap(bitmap)

@@ -2,7 +2,7 @@ plugins { id 'com.android.application' }
 android {
  namespace 'com.example.dateorganizer'
  compileSdk 35
- defaultConfig { applicationId 'com.example.dateorganizer.pro'; minSdk 26; targetSdk 35; versionCode 7; versionName '1.7' }
+ defaultConfig { applicationId 'com.example.dateorganizer.pro'; minSdk 26; targetSdk 35; versionCode 8; versionName '1.8' }
  signingConfigs {
   debug {
    storeFile file(System.getProperty('user.home') + '/.android/date-organizer-v14.keystore')

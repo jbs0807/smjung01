@@ -28,7 +28,7 @@ public class MainActivity extends Activity {
  private static final String LOCAL="com.android.externalstorage.documents";
  private Uri src,dst;
  private TextView status,sourcePath,targetPath,pageText,phaseText,percentText,countText,elapsedText,emptyText;
- private LinearLayout rows;
+ private LinearLayout rows,previewCard;
  private ProgressBar progress;
  private Button move,scanButton,stopButton,previous,next;
  private long startedAt;
@@ -45,7 +45,7 @@ public class MainActivity extends Activity {
  private int page=0;
  private long lastPaint=0;
  private ImageLabeler labeler;
- private final int ink=Color.rgb(22,36,58),teal=Color.rgb(37,99,235),muted=Color.rgb(100,116,139),line=Color.rgb(224,231,239);
+ private final int ink=Color.rgb(22,36,58),teal=Color.rgb(37,99,235),muted=Color.rgb(100,116,139),line=Color.rgb(224,231,239),cyan=Color.rgb(0,229,255),pink=Color.rgb(236,72,153);
  private static class Item {
   Uri uri;String parentId,name,mime,date,reason,feature="",featureReason="";int type;long size,modified;
   String folder(){return OrganizerRules.folderPath(date,feature);}
@@ -67,13 +67,15 @@ public class MainActivity extends Activity {
   LinearLayout location=card(content);section(location,"01  폴더 설정","한 번 연결한 폴더는 다음에도 바로 사용합니다.");
   sourcePath=folderChoice(location,"원본 폴더",()->pick(1));
   targetPath=folderChoice(location,"저장 폴더",()->pick(2));
-  Button same=button("원본 폴더 안에 정리",()->{if(src==null){show("원본 폴더를 먼저 선택하세요.");return;}dst=src;saveFolders();invalidatePlan();updatePaths();show("원본 폴더 안에 날짜별 하위 폴더를 만듭니다.");});
-  same.setTextSize(14);location.addView(same,new LinearLayout.LayoutParams(-1,dp(44)));controls.add(same);
+  Button changeFolder=button("폴더변경시 선택",()->pick(2));
+  changeFolder.setTextSize(14);accentButton(changeFolder,cyan);location.addView(changeFolder,new LinearLayout.LayoutParams(-1,dp(44)));controls.add(changeFolder);
   LinearLayout kinds=card(content);section(kinds,"02  정리 옵션","같은 날짜는 하나의 폴더로 모읍니다.");
   LinearLayout checks=new LinearLayout(this);photos=check("사진",checks);videos=check("동영상",checks);docs=check("문서",checks);kinds.addView(checks);
   TextView example=text("저장 구조   2026년 / 10월 / 261026-시군구",12);example.setTextColor(teal);example.setPadding(0,dp(8),0,dp(8));kinds.addView(example);
   scanButton=addControl(kinds,"파일 검색",this::askScan);
+  accentButton(scanButton,cyan);
   LinearLayout preview=card(content);section(preview,"03  정리 미리보기","파일을 누르면 날짜별 저장 폴더명을 수정합니다.");
+  previewCard=preview;
   emptyText=text("검색을 마치면 이곳에 파일과 저장 폴더가 표시됩니다.",13);emptyText.setTextColor(muted);emptyText.setPadding(0,dp(8),0,dp(12));preview.addView(emptyText);
   rows=new LinearLayout(this);rows.setOrientation(1);preview.addView(rows);
   LinearLayout pages=new LinearLayout(this);previous=button("이전",()->{if(page>0){page--;render();}});next=button("다음",()->{page++;render();});pageText=text("0 / 0",13);pageText.setGravity(Gravity.CENTER);
@@ -84,7 +86,7 @@ public class MainActivity extends Activity {
   LinearLayout metrics=new LinearLayout(this);countText=text("처리 0 / 0개",12);countText.setTextColor(muted);metrics.addView(countText,new LinearLayout.LayoutParams(0,-2,1));elapsedText=text("경과 00:00",12);elapsedText.setTextColor(muted);metrics.addView(elapsedText);progressCard.addView(metrics);
   status=text("폴더를 선택한 뒤 검색을 시작하세요.",12);status.setTextColor(muted);status.setMaxLines(3);status.setEllipsize(android.text.TextUtils.TruncateAt.END);status.setPadding(0,dp(5),0,0);status.setOnClickListener(v->{if(!busy)new AlertDialog.Builder(this).setTitle("작업 상세").setMessage(status.getText()).setPositiveButton("닫기",null).show();});progressCard.addView(status);
   LinearLayout actions=new LinearLayout(this);stopButton=button("중지",()->{stopped=true;stopButton.setEnabled(false);phaseText.setText("중지 중");show("원본을 보존하며 안전하게 중지하고 있습니다.");});actions.addView(stopButton,new LinearLayout.LayoutParams(dp(86),dp(54)));
-  move=button("파일 이동 실행",this::askMove);move.setTextColor(Color.WHITE);move.setBackground(tint(teal));LinearLayout.LayoutParams moveLp=new LinearLayout.LayoutParams(0,dp(54),1);moveLp.leftMargin=dp(10);actions.addView(move,moveLp);base.addView(actions);
+  move=button("파일 이동 실행",this::askMove);move.setTextColor(ink);accentButton(move,pink);LinearLayout.LayoutParams moveLp=new LinearLayout.LayoutParams(0,dp(54),1);moveLp.leftMargin=dp(10);actions.addView(move,moveLp);base.addView(actions);
   setContentView(base);restoreFolders();updatePaths();setBusy(false);render();
   String pending=getPreferences(0).getString("pending","");
   if(!pending.isEmpty())show("이전 작업이 중단되었습니다. 원본/대상 파일을 확인한 뒤 다시 검색하세요.\n"+pending+"\n검증 전 파일의 원본은 삭제하지 않습니다.");
@@ -92,6 +94,7 @@ public class MainActivity extends Activity {
  private int dp(int n){return (int)(n*getResources().getDisplayMetrics().density+.5f);}
  private TextView text(String s,int size){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(ink);return t;}
  private GradientDrawable tint(int c){GradientDrawable d=new GradientDrawable();d.setColor(c);d.setCornerRadius(dp(10));return d;}
+ private void accentButton(Button b,int color){b.setBackground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x2216243a),tint(color),null));}
  private Button button(String s,Runnable r){Button b=new Button(this);b.setText(s);b.setTextSize(14);b.setAllCaps(false);b.setMinWidth(0);b.setMinimumWidth(0);b.setMinHeight(0);b.setMinimumHeight(0);b.setPadding(dp(8),0,dp(8),0);b.setTextColor(ink);b.setTypeface(null,Typeface.BOLD);b.setBackground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x222563eb),tint(Color.rgb(237,242,252)),null));b.setOnClickListener(v->r.run());return b;}
  private LinearLayout card(LinearLayout parent){LinearLayout c=new LinearLayout(this);c.setOrientation(1);c.setPadding(dp(12),dp(12),dp(12),dp(12));GradientDrawable border=tint(Color.WHITE);border.setStroke(dp(1),line);c.setBackground(border);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=dp(8);parent.addView(c,lp);return c;}
  private void section(LinearLayout parent,String title,String hint){TextView t=text(title,15);t.setTypeface(null,Typeface.BOLD);parent.addView(t);TextView h=text(hint,12);h.setTextColor(muted);h.setPadding(0,dp(4),0,dp(8));parent.addView(h);}
@@ -114,10 +117,11 @@ public class MainActivity extends Activity {
  private void restoreFolders(){
   try{Uri u=Uri.parse(getPreferences(0).getString("sourceFolder",""));if(FolderPicker.permitted(this,u))src=u;}catch(Exception ignored){}
   try{Uri u=Uri.parse(getPreferences(0).getString("targetFolder",""));if(FolderPicker.permitted(this,u))dst=u;}catch(Exception ignored){}
+  if(src!=null&&dst==null){dst=src;saveFolders();}
  }
  private void chooseFolder(int code,Uri u){
-  if(code==1)src=u;else if(code==2)dst=u;else return;
-  saveFolders();invalidatePlan();updatePaths();show("폴더 선택 완료 · 연결된 위치는 추가 허용 없이 사용합니다.");
+  if(code==1){src=u;dst=u;}else if(code==2)dst=u;else return;
+  saveFolders();invalidatePlan();updatePaths();show(code==1?"저장 폴더도 원본 폴더와 같게 설정했습니다. 변경하려면 ‘폴더변경시 선택’을 누르세요.":"저장 폴더를 변경했습니다. 원본 폴더는 그대로 유지합니다.");
  }
  private void pick(int code){
   if(busy)return;
@@ -246,6 +250,7 @@ public class MainActivity extends Activity {
   finally{if(bitmap!=null)bitmap.recycle();}
  }
  private void render(){
+  previewCard.setVisibility(items.isEmpty()&&!ready?View.GONE:View.VISIBLE);
   rows.removeAllViews();emptyText.setVisibility(items.isEmpty()?View.VISIBLE:View.GONE);int pages=(items.size()+29)/30;page=Math.max(0,Math.min(page,Math.max(0,pages-1)));
   pageText.setText((pages==0?0:page+1)+" / "+pages);previous.setEnabled(!busy&&page>0);next.setEnabled(!busy&&page+1<pages);
   for(int j=page*30;j<Math.min(items.size(),page*30+30);j++){
@@ -393,6 +398,7 @@ public class MainActivity extends Activity {
  @Override public void onBackPressed(){if(busy){stopped=true;show("중지 중입니다. 완료 후 종료해 주세요.");}else super.onBackPressed();}
  @Override protected void onDestroy(){stopped=true;clock.removeCallbacks(tick);worker.shutdown();super.onDestroy();}
 }
+
 
 
 

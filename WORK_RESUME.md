@@ -28,3 +28,10 @@
 - APK: https://github.com/jbs0807/smjung01/releases/download/date-organizer-v1.7-40241529376/DateFileOrganizer-v1.7.apk
 - 현재 남은 자동 개발 작업 없음. 사용자 휴대폰 설치·실제 저장소 이동은 검증하지 않았으며 개인 파일에 접근하지 않았다. 같은 빌드와 테스트를 반복하지 않는다.
 - 빌드 URL: https://github.com/jbs0807/smjung01/actions/runs/40241529376
+
+## 2026-10-26 v1.8 화면 및 기본 폴더 변경
+
+- 마지막 지시: 첨부 화면을 기본으로 사용. 원본 선택 시 저장 폴더도 동일하게 설정하되 변경 가능. 첫 버튼 ‘폴더변경시 선택’, 첫째·둘째 cyan, 마지막 실행 버튼 핑크.
+- v1.7 백업: backup/date-organizer-before-v1.8-20261026 (68286b5846749513aea7e871187b11f3250635e1).
+- 변경 구현 완료. CI 빌드·기존 단위 테스트·APK 서명 확인 및 릴리스 게시 결과 확인 대기.
+- 다음 재개 지점: date-file-organizer-build 브랜치의 v1.8 커밋 Actions 상태 확인 후 APK 링크 전달. 실행 중인 빌드 중복 실행 금지.

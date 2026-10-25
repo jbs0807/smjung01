@@ -99,7 +99,7 @@ public class MainActivity extends Activity {
   if(!photos.isChecked()&&!videos.isChecked()&&!docs.isChecked()){show("한 가지 이상의 파일 종류를 선택하세요.");return;}
   new AlertDialog.Builder(this).setTitle("선택 폴더 접근 확인")
    .setMessage("선택한 폴더와 하위 폴더의 파일명·날짜를 읽고, 사진의 시각적 특징을 기기 안에서 분석합니다. 개인 문서나 사진이 포함될 수 있습니다. 문서 본문, 연락처, 계정에는 접근하지 않습니다. 외부 전송 없이 검색할까요?")
-   .setNegativeButton("취소",null).setPositiveButton("접근 허용 · 검색",(d,w)->scan()).show();
+   .setNegativeButton("취소",null).setPositiveButton("접근 허용 · 검색",(dialog,which)->scan()).show();
  }
  private void scan(){
   stopped=false;ready=false;items.clear();warnings.clear();page=0;render();setBusy(true);progress.setIndeterminate(true);

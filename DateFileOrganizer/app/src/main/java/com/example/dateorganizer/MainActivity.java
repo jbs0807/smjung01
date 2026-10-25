@@ -179,7 +179,7 @@ public class MainActivity extends Activity {
  }
  private void classify(Item i){
   if(i.name.toLowerCase(Locale.ROOT).matches(".*(screenshot|screen_shot|스크린샷|화면캡처).*")){i.feature="스크린샷";i.featureReason="파일명 기준";return;}
-  i.feature="기타사진";i.featureReason="분류 불확실 · 직접 수정 가능";Bitmap bitmap=null;
+  i.feature="장소미상";i.featureReason="장소 단서 없음 · 직접 수정 가능";Bitmap bitmap=null;
   try{
    BitmapFactory.Options opts=new BitmapFactory.Options();opts.inJustDecodeBounds=true;
    try(InputStream in=getContentResolver().openInputStream(i.uri)){BitmapFactory.decodeStream(in,null,opts);}
@@ -205,7 +205,7 @@ public class MainActivity extends Activity {
  }
  private void edit(Item i){
   String old=i.folder();LinearLayout l=new LinearLayout(this);l.setOrientation(1);l.setPadding(dp(20),dp(8),dp(20),0);EditText input=new EditText(this);input.setSingleLine(true);input.setText(i.feature);l.addView(input);CheckBox group=new CheckBox(this);group.setText("같은 날짜·특징의 사진에 함께 적용");group.setChecked(true);l.addView(group);
-  new AlertDialog.Builder(this).setTitle(i.date+"-사진특징 수정").setView(l).setNegativeButton("취소",null).setPositiveButton("적용",(d,w)->{String f=OrganizerRules.safeFeature(input.getText().toString());for(Item x:items)if(x==i||(group.isChecked()&&x.type==1&&x.folder().equals(old))){x.feature=f;x.featureReason="직접 지정";}render();}).show();
+  new AlertDialog.Builder(this).setTitle(i.date+"-요약장소 수정").setView(l).setNegativeButton("취소",null).setPositiveButton("적용",(d,w)->{String f=OrganizerRules.safeFeature(input.getText().toString());for(Item x:items)if(x==i||(group.isChecked()&&x.type==1&&x.folder().equals(old))){x.feature=f;x.featureReason="직접 지정";}render();}).show();
  }
  private void askMove(){
   if(busy||!ready||items.isEmpty())return;

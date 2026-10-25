@@ -49,16 +49,16 @@ jobs:
           if "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | grep -q 'android.permission.INTERNET'; then
             echo 'Unexpected Internet permission'; exit 1
           fi
-          cp "$APK" DateFileOrganizer-v1.4.apk
+          cp "$APK" DateFileOrganizer-v1.5.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: DateFileOrganizer-v1.4-apk
-          path: DateFileOrganizer-v1.4.apk
+          name: DateFileOrganizer-v1.5-apk
+          path: DateFileOrganizer-v1.5.apk
 
 
       - name: Publish installable APK
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="date-organizer-v1.4-${GITHUB_RUN_ID}"
-          gh release create "$TAG" DateFileOrganizer-v1.4.apk --target "$GITHUB_SHA" --title "날짜별 파일 정리 v1.4" --notes-file DateFileOrganizer/CHANGELOG-v1.4.md --latest
+          TAG="date-organizer-v1.5-${GITHUB_RUN_ID}"
+          gh release create "$TAG" DateFileOrganizer-v1.5.apk --target "$GITHUB_SHA" --title "날짜별 파일 정리 v1.5" --notes-file DateFileOrganizer/CHANGELOG-v1.5-patch.md --latest

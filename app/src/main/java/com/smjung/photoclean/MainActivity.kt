@@ -30,6 +30,9 @@ class MainActivity : Activity() {
  private var candidates = listOf<Uri>()
  private val checkedCandidates = linkedSetOf<Uri>()
  private var busy = false
+ private val mediaDates = java.util.concurrent.ConcurrentHashMap<Uri,Long>()
+ private var closing = false
+ private val previewTasks = mutableSetOf<Task>()
  private class Task(val label:String) {
   @Volatile var cancelled=false
   val signal=CancellationSignal()
@@ -89,7 +92,7 @@ class MainActivity : Activity() {
   val close=TextView(this).apply {
    text="×"; textSize=28f; setTextColor(Color.WHITE); gravity=android.view.Gravity.CENTER
    contentDescription="앱 종료"; background=shape(Color.rgb(210,48,66),dp(4).toFloat())
-   isFocusable=true; setOnClickListener { confirmExit() }
+   isFocusable=true; setOnClickListener { exitImmediately() }
   }
   titleRow.addView(close,LinearLayout.LayoutParams(dp(48),dp(48)))
   add(header,titleRow,6)
@@ -230,14 +233,14 @@ class MainActivity : Activity() {
     val complete=action(t)
     checkTask(t)
     runOnUiThread {
-     if(task!==t || isDestroyed) return@runOnUiThread
+     if(task!==t || closing || isFinishing || isDestroyed) return@runOnUiThread
      if(t.cancelled) finishStopped(t) else {
       try { complete() } finally { task=null; busy=false; progress.isIndeterminate=false; refreshControls() }
      }
     }
    } catch(e:Exception) {
     runOnUiThread {
-     if(task!==t || isDestroyed) return@runOnUiThread
+     if(task!==t || closing || isFinishing || isDestroyed) return@runOnUiThread
      if(t.cancelled || e is CancellationException) finishStopped(t) else {
       update("${label} 오류: ${e.message}",t.done,t.total)
       task=null; busy=false; refreshControls()
@@ -257,12 +260,17 @@ class MainActivity : Activity() {
   if(t.label=="중복 분석") percent.append("\n중복 사진 ${t.duplicates}장 발견 · ${t.groups}그룹 (중간 결과)")
   task=null; busy=false; refreshControls()
  }
- private fun confirmExit() {
-  AlertDialog.Builder(this).setTitle("중복사진 깔끔 정리 툴 종료")
-   .setMessage(if(busy) "진행 중인 작업을 중지하고 종료할까요?" else "앱을 종료하시겠습니까?")
-   .setNegativeButton("취소",null).setPositiveButton("종료") { _,_ -> stopWork(); finishAffinity() }.show()
+ private fun exitImmediately() {
+  closing=true
+  stopWork()
+  previewTasks.forEach { it.cancelled=true; it.thread?.interrupt(); it.signal.cancel() }
+  previewTasks.clear()
+  deletionRunning=false; pendingDelete.clear()
+  finishAndRemoveTask()
  }
  override fun onDestroy() {
+  previewTasks.forEach { it.cancelled=true; it.thread?.interrupt(); it.signal.cancel() }
+  previewTasks.clear()
   task?.let { it.cancelled=true; it.thread?.interrupt(); it.signal.cancel() }
   task=null; super.onDestroy()
  }
@@ -310,14 +318,18 @@ class MainActivity : Activity() {
  private fun loadMedia(t:Task,video:Boolean=false):List<Pair<Uri,String>> {
   val items=mutableListOf<Pair<Uri,String>>()
   val base=if(video) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-  val projection=arrayOf("_id","bucket_display_name")
+  val projection=arrayOf("_id","bucket_display_name","datetaken","date_added")
   contentResolver.query(base,projection,null,null,null,t.signal)?.use { cursor ->
    val id=cursor.getColumnIndexOrThrow("_id")
    val bucket=cursor.getColumnIndexOrThrow("bucket_display_name")
+   val taken=cursor.getColumnIndexOrThrow("datetaken")
+   val added=cursor.getColumnIndexOrThrow("date_added")
    val total=cursor.count
    while(cursor.moveToNext()) {
     checkTask(t)
-    items.add(ContentUris.withAppendedId(base,cursor.getLong(id)) to (cursor.getString(bucket) ?: "기타"))
+    val uri=ContentUris.withAppendedId(base,cursor.getLong(id))
+    mediaDates[uri]=cursor.getLong(taken).takeIf { it>0 } ?: (cursor.getLong(added)*1000L)
+    items.add(uri to (cursor.getString(bucket) ?: "기타"))
     report(t,"${t.label} · 목록 읽는 중…",items.size,total)
    }
   }
@@ -332,7 +344,7 @@ class MainActivity : Activity() {
   if(!permitted()) return
   work("전체 사진") { t ->
    val all=loadMedia(t).map { it.first }
-   val complete:()->Unit={ selectPhotos(all,"전체 사진 불러오기 완료") }; complete
+   val complete:()->Unit={ selectPhotos(all,"전체 사진 불러오기 완료"); reviewMedia(all,false,"전체 사진") }; complete
   }
  }
  private fun chooseFolders() { chooseMediaFolders(false) }
@@ -346,7 +358,10 @@ class MainActivity : Activity() {
    val names=folders.keys.toTypedArray(); val checked=BooleanArray(names.size)
    val complete:()->Unit={
     update("${label} ${names.size}개 검색 완료",t.done,t.total)
-    if(names.isNotEmpty()) AlertDialog.Builder(this).setTitle("${label} 선택")
+    if(!video) {
+     if(names.isEmpty()) Toast.makeText(this,"사진 폴더가 없습니다",Toast.LENGTH_SHORT).show()
+     else showPhotoFolders(folders)
+    } else if(names.isNotEmpty()) AlertDialog.Builder(this).setTitle("${label} 선택")
      .setMultiChoiceItems(names.map { "${it} (${folders[it]?.size ?: 0}개)" }.toTypedArray(),checked) { _,i,value -> checked[i]=value }
      .setNegativeButton("취소") { _,_ -> update("폴더 선택 취소 · 기존 선택 유지") }
      .setPositiveButton("선택 완료") { _,_ ->
@@ -360,6 +375,59 @@ class MainActivity : Activity() {
      }.show()
    }; complete
   }
+ }
+ private fun showPhotoFolders(folders:Map<String,List<Pair<Uri,String>>>) {
+  val names=folders.keys.toList()
+  val chosen=linkedSetOf<String>()
+  val wrap=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(8),dp(8),dp(8),dp(8)) }
+  add(wrap,text("폴더를 누르면 사진 보기 · 체크하면 분석 대상으로 선택",13f,Color.DKGRAY),8)
+  val grid=GridView(this).apply { numColumns=3; horizontalSpacing=dp(8); verticalSpacing=dp(12); stretchMode=GridView.STRETCH_COLUMN_WIDTH }
+  grid.adapter=object:BaseAdapter() {
+   override fun getCount()=names.size
+   override fun getItem(position:Int)=names[position]
+   override fun getItemId(position:Int)=position.toLong()
+   override fun getView(position:Int,convertView:View?,parent:android.view.ViewGroup?):View {
+    val name=names[position]
+    val cell=LinearLayout(this@MainActivity).apply {
+     orientation=LinearLayout.VERTICAL; gravity=android.view.Gravity.CENTER
+     setPadding(dp(4),dp(8),dp(4),dp(8)); background=shape(Color.rgb(244,247,250),dp(10).toFloat())
+    }
+    val folderIcon=object:View(this@MainActivity) {
+     private val paint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+     override fun onDraw(canvas:android.graphics.Canvas) {
+      val w=width.toFloat(); val h=height.toFloat()
+      paint.color=Color.rgb(210,157,71)
+      canvas.drawRoundRect(w*0.1f,h*0.1f,w*0.53f,h*0.45f,dp(5).toFloat(),dp(5).toFloat(),paint)
+      paint.color=Color.rgb(237,184,94)
+      canvas.drawRoundRect(w*0.06f,h*0.28f,w*0.94f,h*0.94f,dp(6).toFloat(),dp(6).toFloat(),paint)
+     }
+    }
+    cell.addView(folderIcon,LinearLayout.LayoutParams(dp(64),dp(56)))
+    add(cell,text(name,14f,navy,true).apply { gravity=android.view.Gravity.CENTER; maxLines=2; ellipsize=android.text.TextUtils.TruncateAt.END },2)
+    add(cell,text("${folders[name]?.size ?: 0}장",12f,Color.DKGRAY).apply { gravity=android.view.Gravity.CENTER },2)
+    cell.addView(CheckBox(this@MainActivity).apply {
+     text="선택"; textSize=12f; isChecked=name in chosen
+     setOnCheckedChangeListener { _,checked -> if(checked) chosen.add(name) else chosen.remove(name) }
+    })
+    cell.setOnClickListener { reviewMedia(folders.getValue(name).map { it.first },false,name) }
+    return cell
+   }
+  }
+  wrap.addView(grid,LinearLayout.LayoutParams(-1,0,1f))
+  val dialog=AlertDialog.Builder(this).setTitle("사진 폴더 · ${names.size}개").setView(wrap)
+   .setNegativeButton("닫기",null).setPositiveButton("선택 완료",null).create()
+  dialog.setOnShowListener {
+   dialog.window?.setLayout(-1,(resources.displayMetrics.heightPixels*0.86f).toInt())
+   dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+    if(chosen.isEmpty()) Toast.makeText(this,"폴더를 선택해 주세요",Toast.LENGTH_SHORT).show()
+    else {
+     val items=chosen.flatMap { folders.getValue(it).map { pair -> pair.first } }
+     selectPhotos(items,"사진 폴더 선택 완료"); dialog.dismiss()
+     reviewMedia(items,false,"선택한 사진 폴더")
+    }
+   }
+  }
+  dialog.show()
  }
  private fun thumbnail(t:Task,uri:Uri,edge:Int):Bitmap? {
   checkTask(t)
@@ -461,11 +529,14 @@ class MainActivity : Activity() {
   work("대용량 사진") { t ->
    val found=mutableListOf<Pair<Uri,Long>>()
    val base=MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-   contentResolver.query(base,arrayOf("_id","_size"),"_size >= ?",arrayOf((10L*1024*1024).toString()),"_size DESC",t.signal)?.use { cursor ->
+   contentResolver.query(base,arrayOf("_id","_size","datetaken","date_added"),"_size >= ?",arrayOf((10L*1024*1024).toString()),"_size DESC",t.signal)?.use { cursor ->
     val id=cursor.getColumnIndexOrThrow("_id"); val size=cursor.getColumnIndexOrThrow("_size")
     val total=cursor.count
     while(cursor.moveToNext()) {
-     checkTask(t); found.add(ContentUris.withAppendedId(base,cursor.getLong(id)) to cursor.getLong(size))
+     checkTask(t)
+     val uri=ContentUris.withAppendedId(base,cursor.getLong(id))
+     mediaDates[uri]=cursor.getLong(2).takeIf { it>0 } ?: (cursor.getLong(3)*1000L)
+     found.add(uri to cursor.getLong(size))
      report(t,"대용량 사진 검색 중…",found.size,total)
     }
    }
@@ -479,6 +550,10 @@ class MainActivity : Activity() {
  private fun reviewMedia(photos:List<Uri>,video:Boolean,title:String) {
   if(photos.isEmpty()) { Toast.makeText(this,"표시할 항목이 없습니다",Toast.LENGTH_SHORT).show(); return }
   val pageSize=20
+  val columns=if(video) 2 else 4
+  var newestFirst=true
+  var ordered=photos.sortedWith(compareByDescending<Uri> { mediaDates[it] ?: 0L }.thenBy { it.toString() })
+  val dateFormat=java.text.SimpleDateFormat("yyyy.MM.dd",java.util.Locale.KOREA)
   val pageCount=(photos.size+pageSize-1)/pageSize
   val wrap=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(8),dp(8),dp(8),dp(8)) }
   val pageLabel=text("",15f,navy,true)
@@ -490,45 +565,64 @@ class MainActivity : Activity() {
   val next=button("다음 페이지") {}
   nav.addView(previous,LinearLayout.LayoutParams(0,dp(48),1f).apply { rightMargin=dp(4) })
   nav.addView(next,LinearLayout.LayoutParams(0,dp(48),1f).apply { leftMargin=dp(4) })
-  add(wrap,text("${if(video) "동영상" else "사진"} ${photos.size}개 · 한 줄 2개씩 표시",16f,navy,true),6)
+  add(wrap,text("${if(video) "동영상" else "사진"} ${photos.size}개 · 한 줄 ${columns}개",16f,navy,true),6)
+  val sortRow=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+  val newest=button("최신순") {}
+  val oldest=button("오래된순") {}
+  sortRow.addView(newest,LinearLayout.LayoutParams(0,dp(48),1f).apply { rightMargin=dp(4) })
+  sortRow.addView(oldest,LinearLayout.LayoutParams(0,dp(48),1f).apply { leftMargin=dp(4) })
+  add(wrap,sortRow,4)
+  add(wrap,text("작성 날짜: 촬영일 우선 · 없으면 기기 등록일",11f,Color.DKGRAY),4)
   add(wrap,pageLabel,6)
   wrap.addView(gridScroll,LinearLayout.LayoutParams(-1,0,1f))
   add(wrap,nav,0)
   val dialog=AlertDialog.Builder(this).setTitle(title).setView(wrap)
-   .setNegativeButton("닫기",null).setPositiveButton(if(video) "확인" else "중복 분석") { _,_ -> if(!video) analyze() }.create()
+   .setNegativeButton("닫기",null).setPositiveButton(if(video) "확인" else "중복 분석") { _,_ ->
+    if(!video) { selectPhotos(ordered,"사진 선택 완료"); analyze() }
+   }.create()
   var page=0
   var previewTask:Task?=null
   fun showPage(index:Int) {
-   previewTask?.let { it.cancelled=true; it.thread?.interrupt() }
+   previewTask?.let { it.cancelled=true; it.thread?.interrupt(); previewTasks.remove(it) }
    page=index.coerceIn(0,pageCount-1)
    val current=page
    val offset=current*pageSize
-   val items=photos.drop(offset).take(pageSize)
+   val items=ordered.subList(offset,minOf(offset+pageSize,ordered.size))
+   newest.text=if(newestFirst) "✓ 최신순" else "최신순"
+   oldest.text=if(newestFirst) "오래된순" else "✓ 오래된순"
+   newest.alpha=if(newestFirst) 1f else 0.55f
+   oldest.alpha=if(newestFirst) 0.55f else 1f
    pageLabel.text="${current+1} / ${pageCount} 페이지 · ${offset+1}~${offset+items.size} / ${photos.size}장"
    previous.isEnabled=current>0
    next.isEnabled=current<pageCount-1
    column.removeAllViews()
    gridScroll.scrollTo(0,0)
-   val side=maxOf(dp(100),(resources.displayMetrics.widthPixels-dp(72))/2)
+   val available=wrap.width.takeIf { it>0 } ?: (resources.displayMetrics.widthPixels-dp(48))
+   val side=maxOf(dp(32),(available-dp(16)-dp(6)*columns)/columns)
    val thumbs=mutableListOf<Pair<Uri,ImageView>>()
-   items.chunked(2).forEachIndexed { rowIndex,pair ->
+   items.chunked(columns).forEachIndexed { rowIndex,pair ->
     val line=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
     pair.forEachIndexed { colIndex,uri ->
-     val cell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(4,4,4,8); background=shape(Color.rgb(238,246,255),12f) }
-     val thumb=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP }
+     val cell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(2),dp(2),dp(2),dp(4)); background=shape(Color.rgb(238,246,255),12f) }
+     val date=mediaDates[uri]?.takeIf { it>0 }?.let { dateFormat.format(java.util.Date(it)) } ?: "날짜 없음"
+     val thumb=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; contentDescription="${if(video) "동영상" else "사진"} · $date · 눌러서 크게 보기" }
      thumbs.add(uri to thumb)
      cell.addView(thumb,LinearLayout.LayoutParams(-1,side))
-     add(cell,text("${if(video) "▶ 동영상" else "사진"} ${offset+rowIndex*2+colIndex+1}",12f,navy,true),0)
+     if(video) add(cell,text("▶ 동영상 ${offset+rowIndex*columns+colIndex+1}",12f,navy,true),0)
+     add(cell,text(date,10f,navy,true).apply {
+      gravity=android.view.Gravity.CENTER; maxLines=1
+      setAutoSizeTextTypeUniformWithConfiguration(8,11,1,android.util.TypedValue.COMPLEX_UNIT_SP)
+     },0)
      cell.setOnClickListener {
       try { startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri,if(video) "video/*" else "image/*"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }
       catch(e:Exception) { Toast.makeText(this,"미디어 열기 실패",Toast.LENGTH_SHORT).show() }
      }
-     line.addView(cell,LinearLayout.LayoutParams(0,-2,1f).apply { if(colIndex==0) rightMargin=6 else leftMargin=6 })
+     line.addView(cell,LinearLayout.LayoutParams(0,-2,1f).apply { leftMargin=dp(1); rightMargin=dp(1) })
     }
-    if(pair.size==1) line.addView(View(this),LinearLayout.LayoutParams(0,1,1f))
+    repeat(columns-pair.size) { line.addView(View(this),LinearLayout.LayoutParams(0,1,1f).apply { leftMargin=dp(1); rightMargin=dp(1) }) }
     add(column,line,8)
    }
-   val t=Task("사진 페이지 미리보기"); previewTask=t
+   val t=Task("사진 페이지 미리보기"); previewTask=t; previewTasks.add(t)
    t.thread=Thread {
     thumbs.forEachIndexed { i,(uri,view) ->
      if(t.cancelled) return@Thread
@@ -537,23 +631,32 @@ class MainActivity : Activity() {
        val retriever=MediaMetadataRetriever()
        try { retriever.setDataSource(this@MainActivity,uri); checkTask(t); retriever.getFrameAtTime(0,MediaMetadataRetriever.OPTION_CLOSEST_SYNC) }
        finally { retriever.release() }
-      } else thumbnail(t,uri,300)
+      } else thumbnail(t,uri,side.coerceAtMost(300))
      } catch(e:Exception) { null }
      runOnUiThread {
-      if(previewTask===t && !t.cancelled && dialog.isShowing) {
+      if(previewTask===t && !t.cancelled && !closing && !isDestroyed && dialog.isShowing) {
        view.setImageBitmap(bitmap)
-       pageLabel.text="${current+1} / ${pageCount} 페이지 · 미리보기 ${i+1}/${items.size}장"
+       pageLabel.text="${current+1}/${pageCount} 페이지 · ${offset+1}~${offset+items.size}/${photos.size}장 · ${i+1}/${items.size} 로딩"
       } else bitmap?.recycle()
      }
     }
    }.apply { start() }
   }
+  fun changeSort(newestOrder:Boolean) {
+   if(newestFirst==newestOrder) return
+   newestFirst=newestOrder
+   val comparator=compareBy<Uri> { mediaDates[it] ?: 0L }.thenBy { it.toString() }
+   ordered=photos.sortedWith(if(newestFirst) comparator.reversed() else comparator)
+   showPage(0)
+  }
+  newest.setOnClickListener { changeSort(true) }
+  oldest.setOnClickListener { changeSort(false) }
   previous.setOnClickListener { showPage(page-1) }
   next.setOnClickListener { showPage(page+1) }
-  dialog.setOnDismissListener { previewTask?.let { it.cancelled=true; it.thread?.interrupt() }; previewTask=null }
+  dialog.setOnDismissListener { previewTask?.let { it.cancelled=true; it.thread?.interrupt(); previewTasks.remove(it) }; previewTask=null }
   dialog.setOnShowListener {
    dialog.window?.setLayout(-1,(resources.displayMetrics.heightPixels*0.82f).toInt())
-   showPage(0)
+   wrap.post { if(dialog.isShowing) showPage(0) }
   }
   dialog.show()
  }

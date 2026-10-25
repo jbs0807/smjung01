@@ -9,7 +9,6 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.BitmapFactory
 import android.graphics.Bitmap
-import android.media.MediaMetadataRetriever
 import android.provider.Settings
 import android.graphics.Typeface
 import android.graphics.drawable.StateListDrawable
@@ -22,7 +21,6 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.view.View
 import android.widget.*
-import java.security.MessageDigest
 
 class MainActivity : Activity() {
  private val selected = mutableListOf<Uri>()
@@ -31,6 +29,20 @@ class MainActivity : Activity() {
  private val checkedCandidates = linkedSetOf<Uri>()
  private var busy = false
  private val mediaDates = java.util.concurrent.ConcurrentHashMap<Uri,Long>()
+ private val mediaSizes = java.util.concurrent.ConcurrentHashMap<Uri,Long>()
+ private val mediaLocations = java.util.concurrent.ConcurrentHashMap<Uri,Pair<String,String>>()
+ private val mediaRevision=java.util.concurrent.atomic.AtomicLong()
+ private data class MediaCache(val revision:Long,val volumes:Set<String>,val items:List<Pair<Uri,String>>)
+ private val mediaCache=mutableMapOf<Boolean,MediaCache>()
+ private val mediaObserver=object:android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
+  override fun onChange(selfChange:Boolean) { mediaRevision.incrementAndGet() }
+ }
+ private class FolderNode(val name:String,val parent:FolderNode?=null,val document:Uri?=null) {
+  val children=linkedMapOf<String,FolderNode>()
+  val photos=mutableListOf<Uri>()
+  var count=0
+  var loaded=false
+ }
  private var closing = false
  private val previewTasks = mutableSetOf<Task>()
  private class Task(val label:String) {
@@ -80,6 +92,7 @@ class MainActivity : Activity() {
  }
  override fun onCreate(savedInstanceState:Bundle?) {
   super.onCreate(savedInstanceState)
+  contentResolver.registerContentObserver(Uri.parse("content://media"),true,mediaObserver)
   window.statusBarColor=navy
   window.navigationBarColor=navy
   val scroll=ScrollView(this).apply { background=GradientDrawable(GradientDrawable.Orientation.TL_BR,intArrayOf(Color.rgb(222,239,255),Color.WHITE,Color.rgb(223,252,247))) }
@@ -90,11 +103,11 @@ class MainActivity : Activity() {
   val titleRow=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER_VERTICAL }
   titleRow.addView(text("중복사진 깔끔 정리 툴",20f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f))
   val close=TextView(this).apply {
-   text="×"; textSize=28f; setTextColor(Color.WHITE); gravity=android.view.Gravity.CENTER
+   text="×"; textSize=20f; setTextColor(Color.WHITE); gravity=android.view.Gravity.CENTER
    contentDescription="앱 종료"; background=shape(Color.rgb(210,48,66),dp(4).toFloat())
    isFocusable=true; setOnClickListener { exitImmediately() }
   }
-  titleRow.addView(close,LinearLayout.LayoutParams(dp(48),dp(48)))
+  titleRow.addView(close,LinearLayout.LayoutParams(dp(24),dp(24)))
   add(header,titleRow,6)
   add(header,text("내 사진을 똑똑하게 정리하는 공간",12f,Color.rgb(185,224,229)),0)
 
@@ -213,7 +226,7 @@ class MainActivity : Activity() {
  private fun report(t:Task,message:String,done:Int=0,total:Int=0,force:Boolean=false) {
   checkTask(t); t.done=done; t.total=total
   val now=android.os.SystemClock.elapsedRealtime()
-  if(!force && now-t.lastReport<100 && done!=total) return
+  if(!force && now-t.lastReport<150) return
   t.lastReport=now
   val duplicates=t.duplicates; val groups=t.groups
   runOnUiThread {
@@ -268,7 +281,12 @@ class MainActivity : Activity() {
   deletionRunning=false; pendingDelete.clear()
   finishAndRemoveTask()
  }
+ override fun onResume() {
+  super.onResume()
+  mediaRevision.incrementAndGet()
+ }
  override fun onDestroy() {
+  contentResolver.unregisterContentObserver(mediaObserver)
   previewTasks.forEach { it.cancelled=true; it.thread?.interrupt(); it.signal.cancel() }
   previewTasks.clear()
   task?.let { it.cancelled=true; it.thread?.interrupt(); it.signal.cancel() }
@@ -280,6 +298,15 @@ class MainActivity : Activity() {
  }
  override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
   super.onActivityResult(requestCode,resultCode,data)
+  if(requestCode==21 && resultCode==RESULT_OK) {
+   data?.data?.let { tree ->
+    try { contentResolver.takePersistableUriPermission(tree,Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch(_:SecurityException) { }
+    val id=android.provider.DocumentsContract.getTreeDocumentId(tree)
+    val doc=android.provider.DocumentsContract.buildDocumentUriUsingTree(tree,id)
+    showFolderBrowser(FolderNode(id.substringAfter(':').ifEmpty { "선택한 저장소" },document=doc),false)
+   }
+   return
+  }
   if(requestCode==3) {
    awaitingDeletePermission=false
    if(resultCode==RESULT_OK) continueLegacyDelete() else {
@@ -316,24 +343,33 @@ class MainActivity : Activity() {
   if(requestCode==10) update(if(grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED) "권한 허용됨 · 다시 검색을 눌러주세요" else "사진 접근 권한이 필요합니다")
  }
  private fun loadMedia(t:Task,video:Boolean=false):List<Pair<Uri,String>> {
+  val volumes=MediaStore.getExternalVolumeNames(this).toSet()
+  val revision=mediaRevision.get()
+  mediaCache[video]?.takeIf { it.revision==revision && it.volumes==volumes }?.let {
+   checkTask(t); return it.items
+  }
   val items=mutableListOf<Pair<Uri,String>>()
   val base=if(video) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-  val projection=arrayOf("_id","bucket_display_name","datetaken","date_added")
+  val projection=arrayOf("_id","bucket_display_name","datetaken","date_added","_size","volume_name","relative_path")
   contentResolver.query(base,projection,null,null,null,t.signal)?.use { cursor ->
-   val id=cursor.getColumnIndexOrThrow("_id")
-   val bucket=cursor.getColumnIndexOrThrow("bucket_display_name")
-   val taken=cursor.getColumnIndexOrThrow("datetaken")
-   val added=cursor.getColumnIndexOrThrow("date_added")
    val total=cursor.count
    while(cursor.moveToNext()) {
     checkTask(t)
-    val uri=ContentUris.withAppendedId(base,cursor.getLong(id))
-    mediaDates[uri]=cursor.getLong(taken).takeIf { it>0 } ?: (cursor.getLong(added)*1000L)
-    items.add(uri to (cursor.getString(bucket) ?: "기타"))
-    report(t,"${t.label} · 목록 읽는 중…",items.size,total)
+    val volume=cursor.getString(5) ?: MediaStore.VOLUME_EXTERNAL_PRIMARY
+    val volumeBase=if(video) MediaStore.Video.Media.getContentUri(volume) else MediaStore.Images.Media.getContentUri(volume)
+    val uri=ContentUris.withAppendedId(volumeBase,cursor.getLong(0))
+    val bucket=cursor.getString(1) ?: "기타"
+    val path=cursor.getString(6) ?: "$bucket/"
+    mediaDates[uri]=cursor.getLong(2).takeIf { it>0 } ?: (cursor.getLong(3)*1000L)
+    mediaSizes[uri]=if(cursor.isNull(4)) -1L else cursor.getLong(4)
+    mediaLocations[uri]=volume to path
+    items.add(uri to bucket)
+    if(items.size%256==0 || items.size==total) report(t,"${t.label} · 목록 읽는 중…",items.size,total)
    }
   }
-  checkTask(t); return items
+  checkTask(t)
+  if(mediaRevision.get()==revision) mediaCache[video]=MediaCache(revision,volumes,items)
+  return items
  }
  private fun selectPhotos(items:List<Uri>,message:String) {
   selected.clear(); selected.addAll(items); candidates=emptyList(); checkedCandidates.clear()
@@ -352,85 +388,180 @@ class MainActivity : Activity() {
  private fun chooseMediaFolders(video:Boolean) {
   val permission=if(video && Build.VERSION.SDK_INT>=33) Manifest.permission.READ_MEDIA_VIDEO else if(Build.VERSION.SDK_INT>=33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
   if(checkSelfPermission(permission)!=PackageManager.PERMISSION_GRANTED) { requestPermissions(arrayOf(permission),10); return }
-  val label=if(video) "동영상 폴더" else "사진 폴더"
-  work(label) { t ->
-   val folders=loadMedia(t,video).groupBy { it.second }.toSortedMap()
-   val names=folders.keys.toTypedArray(); val checked=BooleanArray(names.size)
-   val complete:()->Unit={
-    update("${label} ${names.size}개 검색 완료",t.done,t.total)
-    if(!video) {
-     if(names.isEmpty()) Toast.makeText(this,"사진 폴더가 없습니다",Toast.LENGTH_SHORT).show()
-     else showPhotoFolders(folders)
-    } else if(names.isNotEmpty()) AlertDialog.Builder(this).setTitle("${label} 선택")
-     .setMultiChoiceItems(names.map { "${it} (${folders[it]?.size ?: 0}개)" }.toTypedArray(),checked) { _,i,value -> checked[i]=value }
-     .setNegativeButton("취소") { _,_ -> update("폴더 선택 취소 · 기존 선택 유지") }
-     .setPositiveButton("선택 완료") { _,_ ->
-      val chosen=names.indices.filter { checked[it] }.flatMap { folders[names[it]]!!.map { pair -> pair.first } }
-      if(video) {
-       selectedVideos.clear(); selectedVideos.addAll(chosen)
-       details.text="선택된 동영상 ${chosen.size}개 · 사진 ${selected.size}장"
-       update("동영상 선택 완료",chosen.size,chosen.size)
-       reviewMedia(selectedVideos.toList(),true,"동영상 폴더 보기")
-      } else selectPhotos(chosen,"사진 폴더 선택 완료")
-     }.show()
-   }; complete
+  work(if(video) "동영상 폴더" else "사진 폴더") { t ->
+   val all=loadMedia(t,video)
+   val root=FolderNode("저장소 선택")
+   val storage=getSystemService(android.os.storage.StorageManager::class.java).storageVolumes
+   MediaStore.getExternalVolumeNames(this).sorted().forEach { volume ->
+    val info=storage.firstOrNull { if(volume==MediaStore.VOLUME_EXTERNAL_PRIMARY) it.isPrimary else it.uuid?.equals(volume,true)==true }
+    val label=if(volume==MediaStore.VOLUME_EXTERNAL_PRIMARY) "내부 저장소" else info?.getDescription(this) ?: "SD 카드 · $volume"
+    root.children[volume]=FolderNode(label,root)
+   }
+   all.forEach { (uri,_) ->
+    checkTask(t)
+    val (volume,path)=mediaLocations.getValue(uri)
+    var node=root.children.getOrPut(volume) { FolderNode(volume,root) }
+    root.count++; node.count++
+    path.split('/').filter { it.isNotEmpty() }.forEach { name ->
+     val parent=node
+     node=parent.children.getOrPut(name) { FolderNode(name,parent) }
+     node.count++
+    }
+    node.photos.add(uri)
+   }
+   val complete:()->Unit={ update("저장소와 하위 폴더 준비 완료",all.size,all.size); showFolderBrowser(root,video) }; complete
   }
  }
- private fun showPhotoFolders(folders:Map<String,List<Pair<Uri,String>>>) {
-  val names=folders.keys.toList()
-  val chosen=linkedSetOf<String>()
+ private fun readDocumentFolder(t:Task,node:FolderNode) {
+  if(node.loaded) return
+  val doc=node.document ?: return
+  val query=android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(doc,android.provider.DocumentsContract.getDocumentId(doc))
+  val children=linkedMapOf<String,FolderNode>()
+  val photos=mutableListOf<Uri>()
+  contentResolver.query(query,arrayOf("document_id","_display_name","mime_type","_size","last_modified"),null,null,null,t.signal)?.use { cursor ->
+   while(cursor.moveToNext()) {
+    checkTask(t)
+    val id=cursor.getString(0); val name=cursor.getString(1) ?: id
+    val uri=android.provider.DocumentsContract.buildDocumentUriUsingTree(doc,id)
+    val mime=cursor.getString(2) ?: ""
+    if(mime==android.provider.DocumentsContract.Document.MIME_TYPE_DIR) children[id]=FolderNode(name,node,uri)
+    else if(mime.startsWith("image/")) {
+     val mediaUri=try { MediaStore.getMediaUri(this,uri) } catch(_:Exception) { null }
+     val photo=mediaUri ?: uri
+     photos.add(photo); mediaSizes[photo]=if(cursor.isNull(3)) -1L else cursor.getLong(3)
+     if(mediaUri==null || !mediaDates.containsKey(photo)) mediaDates[photo]=cursor.getLong(4)
+    }
+   }
+  }
+  checkTask(t)
+  node.children.clear(); node.children.putAll(children)
+  node.photos.clear(); node.photos.addAll(photos); node.loaded=true; node.count=photos.size
+ }
+ private fun collectFolder(t:Task,node:FolderNode,includeChildren:Boolean):List<Uri> {
+  val found=mutableListOf<Uri>()
+  val pending=java.util.ArrayDeque<FolderNode>(); pending.add(node)
+  val visited=hashSetOf<String>()
+  while(pending.isNotEmpty()) {
+   checkTask(t)
+   val next=pending.removeFirst()
+   if(next.document!=null && !visited.add(next.document.toString())) continue
+   readDocumentFolder(t,next)
+   found.addAll(next.photos)
+   if(includeChildren) pending.addAll(next.children.values)
+   report(t,"폴더 읽는 중 · ${found.size}장",found.size,0)
+  }
+  return found.distinct()
+ }
+ private fun showFolderBrowser(root:FolderNode,video:Boolean) {
+  var current=root
+  val chosen=linkedSetOf<FolderNode>()
+  var entries=listOf<FolderNode>()
   val wrap=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(8),dp(8),dp(8),dp(8)) }
-  add(wrap,text("폴더를 누르면 사진 보기 · 체크하면 분석 대상으로 선택",13f,Color.DKGRAY),8)
-  val grid=GridView(this).apply { numColumns=3; horizontalSpacing=dp(8); verticalSpacing=dp(12); stretchMode=GridView.STRETCH_COLUMN_WIDTH }
-  grid.adapter=object:BaseAdapter() {
-   override fun getCount()=names.size
-   override fun getItem(position:Int)=names[position]
+  val location=text("",14f,navy,true)
+  val up=button("상위 폴더") {}
+  add(wrap,location,6); add(wrap,up,6)
+  add(wrap,text(if(root.document==null) "사진·동영상이 있는 하위 폴더 표시" else "폴더를 눌러 하위 폴더로 이동 · 날짜는 파일 수정일",11f,Color.DKGRAY),6)
+  val grid=GridView(this).apply { numColumns=3; horizontalSpacing=dp(8); verticalSpacing=dp(8); stretchMode=GridView.STRETCH_COLUMN_WIDTH }
+  val includeChildren=CheckBox(this).apply { text="하위 폴더까지 포함"; isChecked=true }
+  val openPhotos=button(if(video) "이 폴더 동영상 보기" else "이 폴더 사진 보기") {}
+  val loading=text("",13f,teal)
+  wrap.addView(grid,LinearLayout.LayoutParams(-1,0,1f))
+  add(wrap,loading,2); add(wrap,includeChildren,2); add(wrap,openPhotos,4)
+  val dialog=AlertDialog.Builder(this).setTitle(if(video) "동영상 폴더" else "사진 폴더").setView(wrap)
+   .setNegativeButton("닫기",null).apply {
+    if(!video) setNeutralButton("다른 폴더 열기") { _,_ ->
+     try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+     },21) } catch(_:Exception) { Toast.makeText(this@MainActivity,"폴더 선택 앱을 열 수 없습니다",Toast.LENGTH_SHORT).show() }
+    }
+   }.create()
+  val adapter=object:BaseAdapter() {
+   override fun getCount()=entries.size
+   override fun getItem(position:Int)=entries[position]
    override fun getItemId(position:Int)=position.toLong()
    override fun getView(position:Int,convertView:View?,parent:android.view.ViewGroup?):View {
-    val name=names[position]
+    val node=entries[position]
     val cell=LinearLayout(this@MainActivity).apply {
      orientation=LinearLayout.VERTICAL; gravity=android.view.Gravity.CENTER
      setPadding(dp(4),dp(8),dp(4),dp(8)); background=shape(Color.rgb(244,247,250),dp(10).toFloat())
     }
-    val folderIcon=object:View(this@MainActivity) {
+    val icon=object:View(this@MainActivity) {
      private val paint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
      override fun onDraw(canvas:android.graphics.Canvas) {
       val w=width.toFloat(); val h=height.toFloat()
-      paint.color=Color.rgb(210,157,71)
-      canvas.drawRoundRect(w*0.1f,h*0.1f,w*0.53f,h*0.45f,dp(5).toFloat(),dp(5).toFloat(),paint)
-      paint.color=Color.rgb(237,184,94)
+      val drive=node.parent===root && root.document==null
+      paint.color=if(drive) Color.rgb(91,112,148) else Color.rgb(210,157,71)
+      if(!drive) canvas.drawRoundRect(w*0.1f,h*0.1f,w*0.53f,h*0.45f,dp(5).toFloat(),dp(5).toFloat(),paint)
+      if(!drive) paint.color=Color.rgb(237,184,94)
       canvas.drawRoundRect(w*0.06f,h*0.28f,w*0.94f,h*0.94f,dp(6).toFloat(),dp(6).toFloat(),paint)
+      if(drive) { paint.color=Color.rgb(100,230,150); canvas.drawCircle(w*0.2f,h*0.76f,dp(3).toFloat(),paint) }
      }
     }
-    cell.addView(folderIcon,LinearLayout.LayoutParams(dp(64),dp(56)))
-    add(cell,text(name,14f,navy,true).apply { gravity=android.view.Gravity.CENTER; maxLines=2; ellipsize=android.text.TextUtils.TruncateAt.END },2)
-    add(cell,text("${folders[name]?.size ?: 0}장",12f,Color.DKGRAY).apply { gravity=android.view.Gravity.CENTER },2)
+    cell.addView(icon,LinearLayout.LayoutParams(dp(64),dp(56)))
+    add(cell,text(node.name,14f,navy,true).apply { gravity=android.view.Gravity.CENTER; maxLines=2; ellipsize=android.text.TextUtils.TruncateAt.END },2)
+    add(cell,text(if(node.document!=null && !node.loaded) "열기" else "${node.count}개",12f,Color.DKGRAY).apply { gravity=android.view.Gravity.CENTER },0)
     cell.addView(CheckBox(this@MainActivity).apply {
-     text="선택"; textSize=12f; isChecked=name in chosen
-     setOnCheckedChangeListener { _,checked -> if(checked) chosen.add(name) else chosen.remove(name) }
+     text="선택"; textSize=12f; isFocusable=false; isChecked=node in chosen
+     setOnCheckedChangeListener { _,checked ->
+      if(checked) chosen.add(node) else chosen.remove(node)
+      openPhotos.text=if(chosen.isEmpty()) "이 폴더 ${if(video) "동영상" else "사진"} 보기" else "선택한 ${chosen.size}개 폴더 보기"
+      openPhotos.isEnabled=chosen.isNotEmpty() || current!==root || root.document!=null
+     }
     })
-    cell.setOnClickListener { reviewMedia(folders.getValue(name).map { it.first },false,name) }
     return cell
    }
   }
-  wrap.addView(grid,LinearLayout.LayoutParams(-1,0,1f))
-  val dialog=AlertDialog.Builder(this).setTitle("사진 폴더 · ${names.size}개").setView(wrap)
-   .setNegativeButton("닫기",null).setPositiveButton("선택 완료",null).create()
-  dialog.setOnShowListener {
-   dialog.window?.setLayout(-1,(resources.displayMetrics.heightPixels*0.86f).toInt())
-   dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-    if(chosen.isEmpty()) Toast.makeText(this,"폴더를 선택해 주세요",Toast.LENGTH_SHORT).show()
-    else {
-     val items=chosen.flatMap { folders.getValue(it).map { pair -> pair.first } }
-     selectPhotos(items,"사진 폴더 선택 완료"); dialog.dismiss()
-     reviewMedia(items,false,"선택한 사진 폴더")
+  grid.adapter=adapter
+  fun render(node:FolderNode) {
+   current=node
+   entries=node.children.values.sortedBy { it.name.lowercase(java.util.Locale.KOREA) }
+   val parts=mutableListOf<String>(); var n:FolderNode?=node
+   while(n!=null) { parts.add(n.name); n=n.parent }
+   location.text=parts.reversed().joinToString(" / ")
+   up.isEnabled=node.parent!=null
+   openPhotos.isEnabled=chosen.isNotEmpty() || node!==root || root.document!=null
+   loading.text=if(entries.isEmpty() && node.photos.isEmpty()) "표시할 사진이나 하위 폴더가 없습니다" else "현재 폴더 ${node.photos.size}개 · 하위 폴더 ${entries.size}개"
+   adapter.notifyDataSetChanged(); grid.setSelection(0)
+  }
+  fun open(node:FolderNode) {
+   if(node.document!=null && !node.loaded) {
+    loading.text="폴더 읽는 중…"
+    work("폴더 탐색") { t ->
+     readDocumentFolder(t,node)
+     val complete:()->Unit={ if(dialog.isShowing) render(node) }; complete
+    }
+   } else render(node)
+  }
+  grid.setOnItemClickListener { _,_,position,_ -> if(!busy) open(entries[position]) }
+  up.setOnClickListener { if(!busy) current.parent?.let { open(it) } }
+  openPhotos.setOnClickListener {
+   if(!busy) {
+    val node=current; val recursive=includeChildren.isChecked
+    val targets=if(chosen.isEmpty()) listOf(node) else chosen.toList()
+    work("폴더 사진 불러오기") { t ->
+     val photos=targets.flatMap { collectFolder(t,it,recursive) }.distinct()
+     val complete:()->Unit={
+      if(dialog.isShowing) {
+       if(video) { selectedVideos.clear(); selectedVideos.addAll(photos) }
+       else selectPhotos(photos,"${node.name} · ${photos.size}장 선택")
+       reviewMedia(photos,video,node.name)
+      }
+     }; complete
     }
    }
+  }
+  dialog.setOnDismissListener { if(task?.label in listOf("폴더 탐색","폴더 사진 불러오기")) stopWork() }
+  dialog.setOnShowListener {
+   dialog.window?.setLayout(-1,(resources.displayMetrics.heightPixels*0.86f).toInt())
+   // The parent work callback releases busy before this posted navigation runs.
+   wrap.post { if(dialog.isShowing) open(root) }
   }
   dialog.show()
  }
  private fun thumbnail(t:Task,uri:Uri,edge:Int):Bitmap? {
   checkTask(t)
+  try { return contentResolver.loadThumbnail(uri,android.util.Size(edge,edge),t.signal) }
+  catch(_:Exception) { checkTask(t) }
   return try {
    val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
    contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it,null,bounds) }
@@ -447,29 +578,23 @@ class MainActivity : Activity() {
   val items=selected.toList()
   candidates=emptyList(); checkedCandidates.clear(); resultBox.removeAllViews()
   work("중복 분석") { t ->
-   val hashes=linkedMapOf<String,MutableList<Uri>>()
-   report(t,"중복 사진 비교 시작",0,items.size,true)
-   val buffer=ByteArray(65536)
-   items.forEachIndexed { index,uri ->
-    checkTask(t)
-    try {
-     val md=MessageDigest.getInstance("SHA-256")
-     contentResolver.openInputStream(uri)?.use { stream ->
-      while(true) {
-       checkTask(t); val n=stream.read(buffer); if(n<0) break
-       md.update(buffer,0,n)
-       report(t,"사진 비교 중 · ${index+1}번째 읽는 중…",index,items.size)
+   val result=DuplicateFinder.find(items,
+    sizeOf={ uri ->
+     mediaSizes[uri] ?: try {
+      contentResolver.query(uri,arrayOf(android.provider.OpenableColumns.SIZE),null,null,null,t.signal)?.use { c ->
+       if(c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null
       }
-      checkTask(t)
-      val hash=md.digest().joinToString("") { "%02x".format(it) }
-      val group=hashes.getOrPut(hash) { mutableListOf() }
-      if(group.isNotEmpty()) { t.duplicates++; if(group.size==1) t.groups++ }
-      group.add(uri)
-     } ?: run { t.errors++ }
-    } catch(e:Exception) { checkTask(t); t.errors++ }
-    report(t,"사진 비교 중…",index+1,items.size)
-   }
-   val groups=hashes.values.filter { it.size>1 }
+     } catch(_:Exception) { checkTask(t); null }
+    },
+    open={ uri -> contentResolver.openInputStream(uri) },
+    check={ checkTask(t) },
+    progress={ stage,done,total,duplicates,groups ->
+     t.duplicates=duplicates; t.groups=groups
+     report(t,"${stage} · ${done}/${total}장",done,total)
+    })
+   val groups=result.groups
+   t.errors=result.errors
+   t.groups=groups.size; t.duplicates=groups.sumOf { it.size-1 }
    // Bound UI creation and memory, even when a single group contains thousands of copies.
    var remaining=160
    val shown=mutableListOf<List<Uri>>()
@@ -488,7 +613,7 @@ class MainActivity : Activity() {
     candidates=shown.flatMap { it.drop(1) }
     update("분석 완료 · 중복 ${t.groups}그룹",items.size,items.size)
     percent.append("\n중복 사진 ${t.duplicates}장 · ${t.groups}그룹 (보존 사진 제외)")
-    details.text="검사 ${items.size}장 · 중복 ${t.duplicates}장 · 읽기 실패 ${t.errors}장"
+    details.text="검사 ${items.size}장 · 정밀 비교 ${result.verified}장 · 중복 ${t.duplicates}장 · 읽기 실패 ${t.errors}장"
     renderResults(shown,previews,t.duplicates)
     refreshControls()
     pageScroll.post { pageScroll.smoothScrollTo(0,resultBox.top) }
@@ -536,6 +661,7 @@ class MainActivity : Activity() {
      checkTask(t)
      val uri=ContentUris.withAppendedId(base,cursor.getLong(id))
      mediaDates[uri]=cursor.getLong(2).takeIf { it>0 } ?: (cursor.getLong(3)*1000L)
+     mediaSizes[uri]=cursor.getLong(size)
      found.add(uri to cursor.getLong(size))
      report(t,"대용량 사진 검색 중…",found.size,total)
     }
@@ -583,7 +709,7 @@ class MainActivity : Activity() {
   var page=0
   var previewTask:Task?=null
   fun showPage(index:Int) {
-   previewTask?.let { it.cancelled=true; it.thread?.interrupt(); previewTasks.remove(it) }
+   previewTask?.let { it.cancelled=true; it.thread?.interrupt(); it.signal.cancel(); previewTasks.remove(it) }
    page=index.coerceIn(0,pageCount-1)
    val current=page
    val offset=current*pageSize
@@ -627,11 +753,7 @@ class MainActivity : Activity() {
     thumbs.forEachIndexed { i,(uri,view) ->
      if(t.cancelled) return@Thread
      val bitmap=try {
-      if(video) {
-       val retriever=MediaMetadataRetriever()
-       try { retriever.setDataSource(this@MainActivity,uri); checkTask(t); retriever.getFrameAtTime(0,MediaMetadataRetriever.OPTION_CLOSEST_SYNC) }
-       finally { retriever.release() }
-      } else thumbnail(t,uri,side.coerceAtMost(300))
+      thumbnail(t,uri,side.coerceAtMost(300))
      } catch(e:Exception) { null }
      runOnUiThread {
       if(previewTask===t && !t.cancelled && !closing && !isDestroyed && dialog.isShowing) {
@@ -653,7 +775,7 @@ class MainActivity : Activity() {
   oldest.setOnClickListener { changeSort(false) }
   previous.setOnClickListener { showPage(page-1) }
   next.setOnClickListener { showPage(page+1) }
-  dialog.setOnDismissListener { previewTask?.let { it.cancelled=true; it.thread?.interrupt(); previewTasks.remove(it) }; previewTask=null }
+  dialog.setOnDismissListener { previewTask?.let { it.cancelled=true; it.thread?.interrupt(); it.signal.cancel(); previewTasks.remove(it) }; previewTask=null }
   dialog.setOnShowListener {
    dialog.window?.setLayout(-1,(resources.displayMetrics.heightPixels*0.82f).toInt())
    wrap.post { if(dialog.isShowing) showPage(0) }

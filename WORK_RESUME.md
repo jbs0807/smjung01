@@ -24,5 +24,7 @@
 - 백업 브랜치: backup/date-organizer-before-v1.7-20261026
 - 완료: 3단계 경로, 시군구 필터링, 동일 날짜 기존 폴더 재사용, 미리보기 경로, 새 구조 재검색 제외, 날짜 연도 보존, v1.7 버전·배포 파일명, 회귀 테스트.
 - 실제 사용자 사진·개인 위치정보는 읽지 않았다.
-- 다음 단계: GitHub Actions 실행 40241529376의 테스트/빌드/서명 검증 결과를 확인한다. 실패한 경우 해당 단계만 수정한다. 성공 시 v1.7 APK 릴리스 링크를 사용자에게 전달하고 이 기록을 완료로 갱신한다.
+- 완료 확인: GitHub Actions 실행 40241529376의 테스트/빌드/APK 정렬·서명 검증 및 릴리스 배포 모두 성공.
+- APK: https://github.com/jbs0807/smjung01/releases/download/date-organizer-v1.7-40241529376/DateFileOrganizer-v1.7.apk
+- 현재 남은 자동 개발 작업 없음. 사용자 휴대폰 설치·실제 저장소 이동은 검증하지 않았으며 개인 파일에 접근하지 않았다. 같은 빌드와 테스트를 반복하지 않는다.
 - 빌드 URL: https://github.com/jbs0807/smjung01/actions/runs/40241529376

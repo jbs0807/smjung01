@@ -28,6 +28,13 @@ jobs:
           gradle-version: '8.7'
       - name: Build debug APK
         run: gradle --no-daemon --project-dir DateFileOrganizer assembleDebug
+      - name: Verify APK compatibility and signature
+        run: |
+          APK=DateFileOrganizer/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -E "package:|sdkVersion:|targetSdkVersion:"
       - uses: actions/upload-artifact@v4
         with:
           name: DateFileOrganizer-debug-apk

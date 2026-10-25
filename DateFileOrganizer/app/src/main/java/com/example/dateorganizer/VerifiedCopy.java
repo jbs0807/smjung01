@@ -18,11 +18,18 @@ public final class VerifiedCopy {
   }
  }
  public static byte[] hash(Source source,Cancel cancel)throws Exception {
-  MessageDigest md=MessageDigest.getInstance("SHA-256");
-  try(InputStream in=source.open()){if(in==null)throw new IOException("검증 파일 열기 실패");byte[] b=new byte[65536];int n;while((n=in.read(b))!=-1){check(cancel);md.update(b,0,n);}check(cancel);return md.digest();}
+  return hash(source,cancel,count->{});
+ }
+ public static byte[] hash(Source source,Cancel cancel,Progress progress)throws Exception {
+  MessageDigest md=MessageDigest.getInstance("SHA-256");long count=0;
+  try(InputStream in=source.open()){if(in==null)throw new IOException("검증 파일 열기 실패");byte[] b=new byte[65536];int n;while((n=in.read(b))!=-1){check(cancel);md.update(b,0,n);count+=n;progress.bytes(count);}check(cancel);return md.digest();}
  }
  public static void verify(Result copy,Source destination,Source original,Cancel cancel)throws Exception {
-  if(!Arrays.equals(copy.digest,hash(destination,cancel)))throw new IOException("복사본 검증 실패 — 원본 보존");
-  if(!Arrays.equals(copy.digest,hash(original,cancel)))throw new IOException("원본 변경 감지 — 원본 보존");
+  verify(copy,destination,original,cancel,count->{});
+ }
+ public static void verify(Result copy,Source destination,Source original,Cancel cancel,Progress progress)throws Exception {
+  if(!Arrays.equals(copy.digest,hash(destination,cancel,progress)))throw new IOException("복사본 검증 실패 — 원본 보존");
+  if(!Arrays.equals(copy.digest,hash(original,cancel,count->progress.bytes(copy.bytes+count))))throw new IOException("원본 변경 감지 — 원본 보존");
  }
 }
+

@@ -43,6 +43,12 @@ public final class OrganizerRules {
  public static boolean within(String parent,String child) {
   return child.equals(parent)||child.startsWith(parent.endsWith(":")?parent:parent+"/");
  }
+ public static boolean excludeDestination(String source,String destination,String directory) {
+  return !source.equals(destination)&&destination.equals(directory);
+ }
+ public static boolean alreadyAtDestination(String parent,String destination,String folder) {
+  return parent.equals(destination+(destination.endsWith(":")?"":"/")+folder);
+ }
  public static String label(String raw) {
   String l=raw.toLowerCase(Locale.ROOT);
   if(Arrays.asList("beach","sea","ocean","coast","surfing","reef").contains(l))return "바다";
@@ -63,3 +69,4 @@ public final class OrganizerRules {
   return null;
  }
 }
+

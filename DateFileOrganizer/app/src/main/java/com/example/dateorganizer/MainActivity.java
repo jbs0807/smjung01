@@ -48,7 +48,7 @@ public class MainActivity extends Activity {
  private final int ink=Color.rgb(22,36,58),teal=Color.rgb(37,99,235),muted=Color.rgb(100,116,139),line=Color.rgb(224,231,239);
  private static class Item {
   Uri uri;String parentId,name,mime,date,reason,feature="",featureReason="";int type;long size,modified;
-  String folder(){return date+"-"+OrganizerRules.safeFeature(feature);}
+  String folder(){return OrganizerRules.folderPath(date,feature);}
  }
  @Override public void onCreate(Bundle state){
   super.onCreate(state);
@@ -71,7 +71,7 @@ public class MainActivity extends Activity {
   same.setTextSize(14);location.addView(same,new LinearLayout.LayoutParams(-1,dp(44)));controls.add(same);
   LinearLayout kinds=card(content);section(kinds,"02  정리 옵션","같은 날짜는 하나의 폴더로 모읍니다.");
   LinearLayout checks=new LinearLayout(this);photos=check("사진",checks);videos=check("동영상",checks);docs=check("문서",checks);kinds.addView(checks);
-  TextView example=text("폴더명   년월일–시·동  /  위치 없으면 ‘위치미상’",12);example.setTextColor(teal);example.setPadding(0,dp(8),0,dp(8));kinds.addView(example);
+  TextView example=text("저장 구조   2026년 / 10월 / 261026-시군구",12);example.setTextColor(teal);example.setPadding(0,dp(8),0,dp(8));kinds.addView(example);
   scanButton=addControl(kinds,"파일 검색",this::askScan);
   LinearLayout preview=card(content);section(preview,"03  정리 미리보기","파일을 누르면 날짜별 저장 폴더명을 수정합니다.");
   emptyText=text("검색을 마치면 이곳에 파일과 저장 폴더가 표시됩니다.",13);emptyText.setTextColor(muted);emptyText.setPadding(0,dp(8),0,dp(12));preview.addView(emptyText);
@@ -145,7 +145,7 @@ public class MainActivity extends Activity {
   if(src==null||dst==null){show("원본과 대상 폴더를 먼저 선택하세요.");return;}
   if(!photos.isChecked()&&!videos.isChecked()&&!docs.isChecked()){show("한 가지 이상의 파일 종류를 선택하세요.");return;}
   new AlertDialog.Builder(this).setTitle("선택 폴더 접근 확인")
-   .setMessage("선택한 폴더의 파일명·날짜와 사진에 저장된 위치정보(GPS)를 읽습니다. 시·동 확인에는 Android 위치정보 서비스가 사용되며, 제공자에 따라 좌표가 외부로 전달될 수 있습니다. 사진 원본이나 문서 본문을 전송하지 않습니다. 접근을 허용하고 검색할까요?")
+   .setMessage("선택한 폴더의 파일명·날짜와 사진에 저장된 위치정보(GPS)를 읽습니다. 시·군·구 확인에는 Android 위치정보 서비스가 사용되며, 제공자에 따라 좌표가 외부로 전달될 수 있습니다. 사진 원본이나 문서 본문을 전송하지 않습니다. 접근을 허용하고 검색할까요?")
    .setNegativeButton("취소",null).setPositiveButton("접근 허용 · 검색",(dialog,which)->scan()).show();
  }
  private void scan(){
@@ -159,6 +159,12 @@ public class MainActivity extends Activity {
     candidates.sort(Comparator.comparing((Item x)->x.name).thenComparing(x->x.uri.toString()));
      for(Item item:candidates){if(stopped)break;date(item);}
      HashMap<String,String> byDate=new HashMap<>();
+     HashMap<String,Map<String,String>> existingMonths=new HashMap<>();
+     for(Item item:candidates){
+      if(stopped)break;
+      String existing=existingFeature(item.date,existingMonths);
+      if(existing!=null)byDate.put(item.date,existing);
+     }
      for(Item item:candidates){
       if(stopped)break;
       if(item.type==1&&!byDate.containsKey(item.date))byDate.put(item.date,photoLocation(item));
@@ -207,7 +213,7 @@ public class MainActivity extends Activity {
   }catch(Exception ignored){}
   if(i.type==2){MediaMetadataRetriever mm=new MediaMetadataRetriever();try{mm.setDataSource(this,i.uri);String raw=mm.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DATE);i.date=OrganizerRules.metadataDate(raw);if(i.date!=null)i.reason="영상 기록일";}catch(Exception ignored){}finally{try{mm.release();}catch(Exception ignored){}}}
   if(i.date==null){i.date=OrganizerRules.filenameDate(i.name);if(i.date!=null)i.reason="파일명 날짜";}
-  if(i.date==null&&i.modified>0){i.date=new SimpleDateFormat("yyMMdd",Locale.KOREA).format(new Date(i.modified));i.reason="파일 수정일";}
+  if(i.date==null&&i.modified>0){i.date=new SimpleDateFormat("yyyyMMdd",Locale.KOREA).format(new Date(i.modified));i.reason="파일 수정일";}
   if(i.date==null){i.date="날짜미상";i.reason="날짜 정보 없음";}
  }
  private String photoLocation(Item item){
@@ -219,12 +225,7 @@ public class MainActivity extends Activity {
     List<Address> addresses=geocoder.getFromLocation(latLong[0],latLong[1],1);
     if(addresses==null||addresses.isEmpty())return "위치미상";
     Address address=addresses.get(0);
-    String city=address.getLocality();
-    if(city==null||city.isEmpty())city=address.getSubAdminArea();
-    String dong=address.getSubLocality();
-    if(dong==null||dong.isEmpty())dong=address.getThoroughfare();
-    if(city==null||city.isEmpty()||dong==null||dong.isEmpty())return "위치미상";
-    return OrganizerRules.safeFeature(city+dong);
+    return OrganizerRules.districtFeature(address.getAdminArea(),address.getSubAdminArea(),address.getLocality(),address.getSubLocality());
    }catch(Exception e){return "위치미상";}
   }
   private void classify(Item i){
@@ -265,7 +266,7 @@ public class MainActivity extends Activity {
  private void askMove(){
   if(busy||!ready||items.isEmpty())return;
   new AlertDialog.Builder(this).setTitle(items.size()+"개 파일 이동 확인")
-   .setMessage("표시된 날짜별 폴더를 만들고 파일을 옮깁니다. 복사본과 원본의 SHA-256 검증 후 원본을 삭제합니다. 같은 이름은 번호를 붙여 보존합니다. 자동 분류와 날짜를 검토하셨습니까?\n\n정리 중에는 앱 화면을 유지해 주세요.")
+   .setMessage("표시된 년 → 월 → 년월일-시군구 폴더를 만들고 파일을 옮깁니다. 복사본과 원본의 SHA-256 검증 후 원본을 삭제합니다. 같은 이름은 번호를 붙여 보존합니다. 자동 분류와 날짜를 검토하셨습니까?\n\n정리 중에는 앱 화면을 유지해 주세요.")
    .setNegativeButton("다시 검토",null).setPositiveButton("확인 · 이동 실행",(d,w)->process()).show();
  }
  private void process(){
@@ -278,7 +279,7 @@ public class MainActivity extends Activity {
      if(OrganizerRules.alreadyAtDestination(i.parentId,id(root(dst)),i.folder())){skipped++;processed++;paintProgress("정리됨 · 건너뜀",processed,plan.size(),0,i.name);continue;}
      paintProgress("복사 중",index,plan.size(),0,i.name+"\n→ "+i.folder());
      assertUnchanged(i);
-     Uri dir=folders.get(i.folder());if(dir==null){dir=ensure(root(dst),i.folder());folders.put(i.folder(),dir);names.put(i.folder(),names(dir));}
+     Uri dir=folders.get(i.folder());if(dir==null){dir=ensurePath(i.folder(),folders);folders.put(i.folder(),dir);names.put(i.folder(),names(dir));}
      Set<String> used=names.get(i.folder());String base=i.name.replace('/','_');String name=base;int k=0;while(used.contains(name))name=OrganizerRules.uniqueName(base,++k);
      if(stopped)break;
      target=DocumentsContract.createDocument(getContentResolver(),dir,i.mime==null?"application/octet-stream":i.mime,name);if(target==null)throw new IOException("대상 파일 생성 실패");used.add(name);
@@ -333,6 +334,48 @@ public class MainActivity extends Activity {
   HashSet<String> result=new HashSet<>();Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(dst,id(parent));
   try(Cursor c=getContentResolver().query(children,new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME},null,null,null)){if(c==null)throw new IOException("대상 폴더 읽기 실패");while(c.moveToNext())result.add(c.getString(0));}return result;
  }
+ private String existingFeature(String date,Map<String,Map<String,String>> cache)throws Exception {
+  String path=OrganizerRules.folderPath(date,"위치미상");int slash=path.lastIndexOf('/');
+  String monthPath=path.substring(0,slash),dayPrefix=path.substring(slash+1,path.lastIndexOf('-'))+"-";
+  Map<String,String> days=cache.get(monthPath);
+  if(days==null){
+   days=new TreeMap<>();cache.put(monthPath,days);Uri month=root(dst);
+   for(String part:monthPath.split("/")){month=findDirectory(month,part);if(month==null)break;}
+   if(month!=null){
+    Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(dst,id(month));
+    try(Cursor c=getContentResolver().query(children,new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME,DocumentsContract.Document.COLUMN_MIME_TYPE},null,null,null)){
+     if(c==null)throw new IOException("저장 폴더 읽기 실패");
+     while(c.moveToNext()){
+      String name=c.getString(0);
+      if(name!=null&&DocumentsContract.Document.MIME_TYPE_DIR.equals(c.getString(1))&&OrganizerRules.inOrganizedFolder(id(root(dst)),id(month)+"/"+name,1))days.put(name,name.substring(name.indexOf('-')+1));
+     }
+    }
+   }
+  }
+  for(Map.Entry<String,String> entry:days.entrySet())if(entry.getKey().startsWith(dayPrefix))return entry.getValue();
+  return null;
+ }
+ private Uri findDirectory(Uri parent,String name)throws Exception {
+  Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(dst,id(parent));
+  try(Cursor c=getContentResolver().query(children,new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,DocumentsContract.Document.COLUMN_DISPLAY_NAME,DocumentsContract.Document.COLUMN_MIME_TYPE},null,null,null)){
+   if(c==null)throw new IOException("저장 폴더 읽기 실패");
+   while(c.moveToNext())if(name.equals(c.getString(1))){
+    if(!DocumentsContract.Document.MIME_TYPE_DIR.equals(c.getString(2)))throw new IOException("폴더와 같은 이름의 파일이 존재합니다");
+    return DocumentsContract.buildDocumentUriUsingTree(dst,c.getString(0));
+   }
+  }
+  return null;
+ }
+ private Uri ensurePath(String path,Map<String,Uri> cache)throws Exception {
+  Uri current=root(dst);String key="";
+  for(String part:path.split("/")){
+   if(stopped)throw new IOException("작업 중지");
+   key=key.isEmpty()?part:key+"/"+part;
+   Uri cached=cache.get(key);
+   current=cached!=null?cached:ensure(current,part);cache.put(key,current);
+  }
+  return current;
+ }
  private Uri ensure(Uri parent,String name)throws Exception {
   Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(dst,id(parent));
   try(Cursor c=getContentResolver().query(children,new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,DocumentsContract.Document.COLUMN_DISPLAY_NAME,DocumentsContract.Document.COLUMN_MIME_TYPE},null,null,null)){
@@ -350,5 +393,6 @@ public class MainActivity extends Activity {
  @Override public void onBackPressed(){if(busy){stopped=true;show("중지 중입니다. 완료 후 종료해 주세요.");}else super.onBackPressed();}
  @Override protected void onDestroy(){stopped=true;clock.removeCallbacks(tick);worker.shutdown();super.onDestroy();}
 }
+
 
 

@@ -45,35 +45,36 @@ public class MainActivity extends Activity {
  private int page=0;
  private long lastPaint=0;
  private ImageLabeler labeler;
- private final int ink=Color.rgb(22,36,58),teal=Color.rgb(0,116,104),muted=Color.rgb(100,116,139),line=Color.rgb(224,231,239);
+ private final int ink=Color.rgb(22,36,58),teal=Color.rgb(37,99,235),muted=Color.rgb(100,116,139),line=Color.rgb(224,231,239);
  private static class Item {
   Uri uri;String parentId,name,mime,date,reason,feature="",featureReason="";int type;long size,modified;
   String folder(){return date+"-"+OrganizerRules.safeFeature(feature);}
  }
  @Override public void onCreate(Bundle state){
   super.onCreate(state);
-  getWindow().setStatusBarColor(ink);getWindow().setNavigationBarColor(ink);
-  LinearLayout base=new LinearLayout(this);base.setOrientation(1);base.setBackgroundColor(Color.rgb(243,246,250));
-  base.setPadding(dp(18),dp(8),dp(18),dp(10));
-  if(Build.VERSION.SDK_INT>=35)base.setOnApplyWindowInsetsListener((v,in)->{v.setPadding(dp(18)+in.getSystemWindowInsetLeft(),dp(8)+in.getSystemWindowInsetTop(),dp(18)+in.getSystemWindowInsetRight(),dp(10)+in.getSystemWindowInsetBottom());return in.consumeSystemWindowInsets();});
+  getWindow().setStatusBarColor(Color.rgb(244,246,250));getWindow().setNavigationBarColor(Color.rgb(244,246,250));
+  getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+  LinearLayout base=new LinearLayout(this);base.setOrientation(1);base.setBackgroundColor(Color.rgb(244,246,250));
+  base.setPadding(dp(16),dp(8),dp(16),dp(10));
+  if(Build.VERSION.SDK_INT>=35)base.setOnApplyWindowInsetsListener((v,in)->{v.setPadding(dp(16)+in.getSystemWindowInsetLeft(),dp(8)+in.getSystemWindowInsetTop(),dp(16)+in.getSystemWindowInsetRight(),dp(10)+in.getSystemWindowInsetBottom());return in.consumeSystemWindowInsets();});
   LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
   LinearLayout titleBlock=new LinearLayout(this);titleBlock.setOrientation(1);
-  TextView title=text("파일 정리",26);title.setTypeface(null,Typeface.BOLD);titleBlock.addView(title);
-  TextView subtitle=text("날짜와 사진 특징으로 정돈하는 내 파일",12);subtitle.setTextColor(muted);titleBlock.addView(subtitle);
+  TextView title=text("파일 정리",23);title.setTypeface(null,Typeface.BOLD);titleBlock.addView(title);
+  TextView subtitle=text("날짜별로 모으고, 한눈에 확인하세요",12);subtitle.setTextColor(muted);titleBlock.addView(subtitle);
   header.addView(titleBlock,new LinearLayout.LayoutParams(0,-2,1));
   Button exit=button("×",()->{if(busy){stopped=true;show("작업을 안전하게 중지하고 있습니다.");}else finish();});exit.setTextSize(26);exit.setContentDescription("닫기");header.addView(exit,new LinearLayout.LayoutParams(dp(48),dp(48)));base.addView(header);
-  ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);LinearLayout content=new LinearLayout(this);content.setOrientation(1);scroll.addView(content);LinearLayout.LayoutParams scrollLp=new LinearLayout.LayoutParams(-1,0,1);scrollLp.topMargin=dp(14);base.addView(scroll,scrollLp);
-  LinearLayout location=card(content);section(location,"01  폴더 설정","같은 폴더 안에서 정리하거나 다른 폴더로 이동합니다.");
+  ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);LinearLayout content=new LinearLayout(this);content.setOrientation(1);scroll.addView(content);LinearLayout.LayoutParams scrollLp=new LinearLayout.LayoutParams(-1,0,1);scrollLp.topMargin=dp(10);base.addView(scroll,scrollLp);
+  LinearLayout location=card(content);section(location,"01  폴더 설정","한 번 연결한 폴더는 다음에도 바로 사용합니다.");
   sourcePath=folderChoice(location,"원본 폴더",()->pick(1));
   targetPath=folderChoice(location,"저장 폴더",()->pick(2));
-  Button same=button("원본 폴더 안에 정리",()->{if(src==null){show("원본 폴더를 먼저 선택하세요.");return;}dst=src;invalidatePlan();updatePaths();show("원본 폴더 안에 날짜별 하위 폴더를 만듭니다.");});
-  same.setTextSize(13);location.addView(same,new LinearLayout.LayoutParams(-1,dp(44)));controls.add(same);
-  LinearLayout kinds=card(content);section(kinds,"02  정리할 파일","사진의 특징은 기기에서 분석하며 직접 수정할 수 있습니다.");
+  Button same=button("원본 폴더 안에 정리",()->{if(src==null){show("원본 폴더를 먼저 선택하세요.");return;}dst=src;saveFolders();invalidatePlan();updatePaths();show("원본 폴더 안에 날짜별 하위 폴더를 만듭니다.");});
+  same.setTextSize(14);location.addView(same,new LinearLayout.LayoutParams(-1,dp(44)));controls.add(same);
+  LinearLayout kinds=card(content);section(kinds,"02  정리 옵션","같은 날짜는 하나의 폴더로 모읍니다.");
   LinearLayout checks=new LinearLayout(this);photos=check("사진",checks);videos=check("동영상",checks);docs=check("문서",checks);kinds.addView(checks);
-  TextView example=text("폴더 예시   261025-바다  ·  261025-문서",12);example.setTextColor(teal);example.setPadding(0,dp(8),0,dp(8));kinds.addView(example);
-  scanButton=addControl(kinds,"검색 · 분류 미리보기",this::askScan);
-  LinearLayout preview=card(content);section(preview,"분류 미리보기","촬영일 → 파일명 날짜 → 수정일. 저장 위치의 날짜 폴더는 재정리하지 않습니다.");
-  emptyText=text("검색하면 파일별 저장 위치를 확인할 수 있습니다.",13);emptyText.setTextColor(muted);emptyText.setPadding(0,dp(16),0,dp(16));preview.addView(emptyText);
+  TextView example=text("폴더명   년월일–시·동  /  위치 없으면 ‘위치미상’",12);example.setTextColor(teal);example.setPadding(0,dp(8),0,dp(8));kinds.addView(example);
+  scanButton=addControl(kinds,"파일 검색",this::askScan);
+  LinearLayout preview=card(content);section(preview,"03  정리 미리보기","파일을 누르면 날짜별 저장 폴더명을 수정합니다.");
+  emptyText=text("검색을 마치면 이곳에 파일과 저장 폴더가 표시됩니다.",13);emptyText.setTextColor(muted);emptyText.setPadding(0,dp(8),0,dp(12));preview.addView(emptyText);
   rows=new LinearLayout(this);rows.setOrientation(1);preview.addView(rows);
   LinearLayout pages=new LinearLayout(this);previous=button("이전",()->{if(page>0){page--;render();}});next=button("다음",()->{page++;render();});pageText=text("0 / 0",13);pageText.setGravity(Gravity.CENTER);
   pages.addView(previous,new LinearLayout.LayoutParams(0,dp(44),1));pages.addView(pageText,new LinearLayout.LayoutParams(0,dp(44),1));pages.addView(next,new LinearLayout.LayoutParams(0,dp(44),1));preview.addView(pages);
@@ -84,45 +85,67 @@ public class MainActivity extends Activity {
   status=text("폴더를 선택한 뒤 검색을 시작하세요.",12);status.setTextColor(muted);status.setMaxLines(3);status.setEllipsize(android.text.TextUtils.TruncateAt.END);status.setPadding(0,dp(5),0,0);status.setOnClickListener(v->{if(!busy)new AlertDialog.Builder(this).setTitle("작업 상세").setMessage(status.getText()).setPositiveButton("닫기",null).show();});progressCard.addView(status);
   LinearLayout actions=new LinearLayout(this);stopButton=button("중지",()->{stopped=true;stopButton.setEnabled(false);phaseText.setText("중지 중");show("원본을 보존하며 안전하게 중지하고 있습니다.");});actions.addView(stopButton,new LinearLayout.LayoutParams(dp(86),dp(54)));
   move=button("파일 이동 실행",this::askMove);move.setTextColor(Color.WHITE);move.setBackground(tint(teal));LinearLayout.LayoutParams moveLp=new LinearLayout.LayoutParams(0,dp(54),1);moveLp.leftMargin=dp(10);actions.addView(move,moveLp);base.addView(actions);
-  setContentView(base);setBusy(false);render();
+  setContentView(base);restoreFolders();updatePaths();setBusy(false);render();
   String pending=getPreferences(0).getString("pending","");
   if(!pending.isEmpty())show("이전 작업이 중단되었습니다. 원본/대상 파일을 확인한 뒤 다시 검색하세요.\n"+pending+"\n검증 전 파일의 원본은 삭제하지 않습니다.");
  }
  private int dp(int n){return (int)(n*getResources().getDisplayMetrics().density+.5f);}
  private TextView text(String s,int size){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(ink);return t;}
- private GradientDrawable tint(int c){GradientDrawable d=new GradientDrawable();d.setColor(c);d.setCornerRadius(dp(12));return d;}
- private Button button(String s,Runnable r){Button b=new Button(this);b.setText(s);b.setTextSize(14);b.setAllCaps(false);b.setTextColor(ink);b.setTypeface(null,Typeface.BOLD);b.setBackground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x22007468),tint(Color.rgb(232,239,244)),null));b.setOnClickListener(v->r.run());return b;}
- private LinearLayout card(LinearLayout parent){LinearLayout c=new LinearLayout(this);c.setOrientation(1);c.setPadding(dp(16),dp(16),dp(16),dp(16));c.setBackground(tint(Color.WHITE));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=dp(12);parent.addView(c,lp);return c;}
- private void section(LinearLayout parent,String title,String hint){TextView t=text(title,15);t.setTypeface(null,Typeface.BOLD);parent.addView(t);TextView h=text(hint,12);h.setTextColor(muted);h.setPadding(0,dp(6),0,dp(10));parent.addView(h);}
+ private GradientDrawable tint(int c){GradientDrawable d=new GradientDrawable();d.setColor(c);d.setCornerRadius(dp(10));return d;}
+ private Button button(String s,Runnable r){Button b=new Button(this);b.setText(s);b.setTextSize(14);b.setAllCaps(false);b.setMinWidth(0);b.setMinimumWidth(0);b.setMinHeight(0);b.setMinimumHeight(0);b.setPadding(dp(8),0,dp(8),0);b.setTextColor(ink);b.setTypeface(null,Typeface.BOLD);b.setBackground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x222563eb),tint(Color.rgb(237,242,252)),null));b.setOnClickListener(v->r.run());return b;}
+ private LinearLayout card(LinearLayout parent){LinearLayout c=new LinearLayout(this);c.setOrientation(1);c.setPadding(dp(12),dp(12),dp(12),dp(12));GradientDrawable border=tint(Color.WHITE);border.setStroke(dp(1),line);c.setBackground(border);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=dp(8);parent.addView(c,lp);return c;}
+ private void section(LinearLayout parent,String title,String hint){TextView t=text(title,15);t.setTypeface(null,Typeface.BOLD);parent.addView(t);TextView h=text(hint,12);h.setTextColor(muted);h.setPadding(0,dp(4),0,dp(8));parent.addView(h);}
  private TextView folderChoice(LinearLayout parent,String label,Runnable action){LinearLayout row=new LinearLayout(this);row.setOrientation(1);row.setPadding(dp(12),dp(10),dp(12),dp(10));GradientDrawable bg=tint(Color.rgb(248,250,252));bg.setStroke(dp(1),line);row.setBackground(bg);TextView title=text(label+"  ›",13);title.setTypeface(null,Typeface.BOLD);row.addView(title);TextView path=text("폴더를 선택하세요",12);path.setTextColor(muted);path.setMaxLines(2);path.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);row.addView(path);row.setOnClickListener(v->action.run());row.setFocusable(true);row.setContentDescription(label+" 선택");LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=dp(8);parent.addView(row,lp);controls.add(row);return path;}
  private void updatePaths(){sourcePath.setText(src==null?"폴더를 선택하세요":displayPath(src));targetPath.setText(dst==null?"폴더를 선택하세요":displayPath(dst)+(src!=null&&id(root(src)).equals(id(root(dst)))?"  ·  같은 폴더":""));}
- private String displayPath(Uri tree){return DocumentsContract.getTreeDocumentId(tree).replace("primary:","내장 저장소 / ");}
+ private String displayPath(Uri tree){return FolderPicker.name(this,tree);}
  private void paintProgress(String phase,int completed,int total,double fraction,String detail){runOnUiThread(()->{if(isDestroyed())return;phaseText.setText(stopped?"중지 중":phase);if(total>0){progress.setIndeterminate(false);double ratio=Math.max(0,Math.min(1,(completed+Math.min(.99,fraction))/total));progress.setProgress((int)(ratio*1000));percentText.setText(String.format(Locale.KOREA,"%.1f%%",ratio*100));countText.setText("처리 "+completed+" / "+total+"개");}status.setText(detail);});}
  private String bytes(long n){return n<1048576?String.format(Locale.KOREA,"%.1f KB",n/1024.0):String.format(Locale.KOREA,"%.1f MB",n/1048576.0);}
 
  private Button addControl(LinearLayout l,String s,Runnable r){Button b=button(s,r);l.addView(b,new LinearLayout.LayoutParams(-1,dp(52)));controls.add(b);return b;}
- private CheckBox check(String name,LinearLayout l){CheckBox c=new CheckBox(this);c.setText(name);c.setChecked(true);c.setTextColor(ink);l.addView(c,new LinearLayout.LayoutParams(0,-2,1));controls.add(c);c.setOnCheckedChangeListener((v,on)->invalidatePlan());return c;}
+ private CheckBox check(String name,LinearLayout l){CheckBox c=new CheckBox(this);c.setText(name);c.setChecked(true);c.setTextColor(ink);c.setTextSize(14);c.setMinHeight(dp(48));c.setButtonTintList(android.content.res.ColorStateList.valueOf(teal));l.addView(c,new LinearLayout.LayoutParams(0,-2,1));controls.add(c);c.setOnCheckedChangeListener((v,on)->invalidatePlan());return c;}
  private void show(String s){runOnUiThread(()->{if(!isDestroyed())status.setText(s);});}
  private void invalidatePlan(){ready=false;items.clear();page=0;if(move!=null){move.setEnabled(false);move.setAlpha(.4f);render();}}
  private void setBusy(boolean value){busy=value;for(View v:controls){v.setEnabled(!value);v.setAlpha(value?.5f:1f);}move.setEnabled(!value&&ready&&!items.isEmpty());move.setAlpha(move.isEnabled()?1f:.4f);clock.removeCallbacks(tick);if(value){startedAt=SystemClock.elapsedRealtime();clock.post(tick);}stopButton.setEnabled(value);stopButton.setAlpha(value?1f:.4f);previous.setEnabled(!value&&page>0);next.setEnabled(!value&&(page+1)*30<items.size());if(value)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);}
- private void pick(int code){if(busy)return;Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);i.putExtra(Intent.EXTRA_LOCAL_ONLY,true);i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(i,code);}
- @Override protected void onActivityResult(int r,int c,Intent data){
-  super.onActivityResult(r,c,data);if(c!=RESULT_OK||data==null||data.getData()==null)return;
-  Uri u=data.getData();if(!LOCAL.equals(u.getAuthority())){show("휴대폰 내부 저장소 또는 SD카드 폴더를 선택하세요. 클라우드 제공자는 사용하지 않습니다.");return;}
-  int flags=data.getFlags()&(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-  if((flags&Intent.FLAG_GRANT_WRITE_URI_PERMISSION)==0){show("파일 이동에 필요한 폴더 쓰기 권한을 허용해 주세요.");return;}
-  try{getContentResolver().takePersistableUriPermission(u,flags);}catch(Exception ignored){}
-  if(r==1)src=u;else if(r==2)dst=u;invalidatePlan();
-  updatePaths();
+ private void saveFolders(){
+  android.content.SharedPreferences.Editor e=getPreferences(0).edit();
+  if(src!=null)e.putString("sourceFolder",src.toString());else e.remove("sourceFolder");
+  if(dst!=null)e.putString("targetFolder",dst.toString());else e.remove("targetFolder");e.apply();
  }
- private Uri root(Uri tree){return DocumentsContract.buildDocumentUriUsingTree(tree,DocumentsContract.getTreeDocumentId(tree));}
+ private void restoreFolders(){
+  try{Uri u=Uri.parse(getPreferences(0).getString("sourceFolder",""));if(FolderPicker.permitted(this,u))src=u;}catch(Exception ignored){}
+  try{Uri u=Uri.parse(getPreferences(0).getString("targetFolder",""));if(FolderPicker.permitted(this,u))dst=u;}catch(Exception ignored){}
+ }
+ private void chooseFolder(int code,Uri u){
+  if(code==1)src=u;else if(code==2)dst=u;else return;
+  saveFolders();invalidatePlan();updatePaths();show("폴더 선택 완료 · 연결된 위치는 추가 허용 없이 사용합니다.");
+ }
+ private void pick(int code){
+  if(busy)return;
+  new FolderPicker(this,code==1?"원본 폴더 선택":"저장 폴더 선택",code==1?src:dst,u->chooseFolder(code,u),()->connectFolder(code));
+ }
+ private void connectFolder(int code){
+  Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);i.putExtra(Intent.EXTRA_LOCAL_ONLY,true);
+  Uri initial=code==1?src:dst;if(initial!=null)i.putExtra(DocumentsContract.EXTRA_INITIAL_URI,root(initial));
+  i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION|Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+  startActivityForResult(i,code);
+ }
+ @Override protected void onActivityResult(int r,int c,Intent data){
+  super.onActivityResult(r,c,data);if((r!=1&&r!=2)||c!=RESULT_OK||data==null||data.getData()==null)return;
+  Uri u=data.getData();if(!LOCAL.equals(u.getAuthority())){show("휴대폰 내부 저장소 또는 SD카드 폴더를 선택하세요.");return;}
+  int required=Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
+  int flags=data.getFlags()&required;
+  if(flags!=required){show("파일 정리에 필요한 읽기·쓰기 권한을 허용해 주세요.");return;}
+  try{getContentResolver().takePersistableUriPermission(u,flags);}catch(Exception e){show("폴더 권한을 저장하지 못했습니다. 폴더를 다시 연결해 주세요.");return;}
+  chooseFolder(r,u);
+ }
+ private Uri root(Uri tree){return FolderPicker.document(this,tree);}
  private String id(Uri u){return DocumentsContract.getDocumentId(u);}
  private void askScan(){
   if(busy)return;
   if(src==null||dst==null){show("원본과 대상 폴더를 먼저 선택하세요.");return;}
   if(!photos.isChecked()&&!videos.isChecked()&&!docs.isChecked()){show("한 가지 이상의 파일 종류를 선택하세요.");return;}
   new AlertDialog.Builder(this).setTitle("선택 폴더 접근 확인")
-   .setMessage("선택한 폴더와 하위 폴더의 파일명·날짜를 읽고, 사진의 시각적 특징을 기기 안에서 분석합니다. 개인 문서나 사진이 포함될 수 있습니다. 문서 본문, 연락처, 계정에는 접근하지 않습니다. 외부 전송 없이 검색할까요?")
+   .setMessage("선택한 폴더의 파일명·날짜와 사진에 저장된 위치정보(GPS)를 읽습니다. 시·동 확인에는 Android 위치정보 서비스가 사용되며, 제공자에 따라 좌표가 외부로 전달될 수 있습니다. 사진 원본이나 문서 본문을 전송하지 않습니다. 접근을 허용하고 검색할까요?")
    .setNegativeButton("취소",null).setPositiveButton("접근 허용 · 검색",(dialog,which)->scan()).show();
  }
  private void scan(){
@@ -131,7 +154,7 @@ public class MainActivity extends Activity {
   worker.execute(()->{
    ArrayList<Item> found=new ArrayList<>();boolean success=false;
    try {
-    if(p)labeler=ImageLabeling.getClient(new ImageLabelerOptions.Builder().setConfidenceThreshold(.70f).build());
+    // Date/location grouping does not require loading the image-labeling model.
     ArrayList<Item> candidates=new ArrayList<>();walk(root(src),0,candidates,p,v,d,new HashSet<>());
     candidates.sort(Comparator.comparing((Item x)->x.name).thenComparing(x->x.uri.toString()));
      for(Item item:candidates){if(stopped)break;date(item);}
@@ -141,12 +164,12 @@ public class MainActivity extends Activity {
       if(item.type==1&&!byDate.containsKey(item.date))byDate.put(item.date,photoLocation(item));
      }
      for(int n=0;n<candidates.size()&&!stopped;n++){
-     Item item=candidates.get(n);paintProgress("날짜 · 특징 분석",n,candidates.size(),0,item.name);
+     Item item=candidates.get(n);paintProgress("날짜 · 위치 확인",n,candidates.size(),0,item.name);
      if(OrganizerRules.inOrganizedFolder(id(root(dst)),item.parentId,item.type)){alreadySorted++;paintProgress("정리됨 · 건너뜀",n+1,candidates.size(),0,item.name);continue;}
      item.feature=byDate.containsKey(item.date)?byDate.get(item.date):"위치미상";
       item.featureReason=item.type==1?"같은 날짜 첫 사진의 GPS 기준":"같은 날짜 사진의 위치 기준";
      if(OrganizerRules.alreadyAtDestination(item.parentId,id(root(dst)),item.folder()))alreadySorted++;else found.add(item);
-     paintProgress("날짜 · 특징 분석",n+1,candidates.size(),0,item.name+"\n"+item.folder());
+     paintProgress("날짜 · 위치 확인",n+1,candidates.size(),0,item.name+"\n"+item.folder());
     }
     success=!stopped;
    }catch(Exception e){warnings.add("검색 중단: "+message(e));}
@@ -225,14 +248,19 @@ public class MainActivity extends Activity {
   rows.removeAllViews();emptyText.setVisibility(items.isEmpty()?View.VISIBLE:View.GONE);int pages=(items.size()+29)/30;page=Math.max(0,Math.min(page,Math.max(0,pages-1)));
   pageText.setText((pages==0?0:page+1)+" / "+pages);previous.setEnabled(!busy&&page>0);next.setEnabled(!busy&&page+1<pages);
   for(int j=page*30;j<Math.min(items.size(),page*30+30);j++){
-   Item i=items.get(j);TextView row=text(i.name+"\n→ "+i.folder()+"\n"+i.reason+(i.type==1?" · "+i.featureReason:""),13);
-   row.setPadding(dp(12),dp(12),dp(12),dp(12));row.setBackground(tint(Color.rgb(247,249,252)));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.topMargin=dp(8);rows.addView(row,lp);
-   if(i.type==1)row.setOnClickListener(v->{if(!busy&&ready)edit(i);});
+   Item i=items.get(j);LinearLayout row=new LinearLayout(this);row.setOrientation(1);row.setPadding(0,dp(8),0,dp(8));
+   TextView name=text(i.name,14);name.setMaxLines(1);name.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);row.addView(name);
+   TextView folder=text("→ "+i.folder(),13);folder.setTextColor(teal);folder.setMaxLines(2);row.addView(folder);
+   TextView meta=text(i.reason+" · "+(i.size>=0?bytes(i.size):"크기 미상"),11);meta.setTextColor(muted);row.addView(meta);
+   row.setBackground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x112563eb),tint(Color.WHITE),null));
+   row.setFocusable(true);row.setContentDescription(i.name+", 저장 폴더 "+i.folder()+", 눌러서 수정");rows.addView(row,new LinearLayout.LayoutParams(-1,-2));
+   View divider=new View(this);divider.setBackgroundColor(line);rows.addView(divider,new LinearLayout.LayoutParams(-1,dp(1)));
+   row.setOnClickListener(v->{if(!busy&&ready)edit(i);});
   }
  }
  private void edit(Item i){
-  String old=i.folder();LinearLayout l=new LinearLayout(this);l.setOrientation(1);l.setPadding(dp(20),dp(8),dp(20),0);EditText input=new EditText(this);input.setSingleLine(true);input.setText(i.feature);l.addView(input);CheckBox group=new CheckBox(this);group.setText("같은 날짜의 모든 파일에 적용");group.setChecked(true);l.addView(group);
-  new AlertDialog.Builder(this).setTitle(i.date+"-요약장소 수정").setView(l).setNegativeButton("취소",null).setPositiveButton("적용",(d,w)->{String f=OrganizerRules.safeFeature(input.getText().toString());for(Item x:items)if(x==i||(group.isChecked()&&x.date.equals(i.date))){x.feature=f;x.featureReason="직접 지정";}render();}).show();
+  String old=i.folder();LinearLayout l=new LinearLayout(this);l.setOrientation(1);l.setPadding(dp(20),dp(8),dp(20),0);EditText input=new EditText(this);input.setSingleLine(true);input.setText(i.feature);l.addView(input);TextView group=text("같은 날짜의 모든 파일에 함께 적용됩니다.",13);group.setTextColor(muted);l.addView(group);
+  new AlertDialog.Builder(this).setTitle(i.date+"-요약장소 수정").setView(l).setNegativeButton("취소",null).setPositiveButton("적용",(d,w)->{String f=OrganizerRules.safeFeature(input.getText().toString());for(Item x:items)if(x.date.equals(i.date)){x.feature=f;x.featureReason="직접 지정";}render();}).show();
  }
  private void askMove(){
   if(busy||!ready||items.isEmpty())return;
@@ -276,9 +304,23 @@ public class MainActivity extends Activity {
     }
     processed++;paintProgress("파일 이동",processed,plan.size(),0,"이동 "+done+"개 · 건너뜀 "+skipped+"개 · 오류 "+failed+"개");
    }
+   final int movedCount=done,copyCount=copiedOnly,errorCount=failed,remainingCount=plan.size()-done-copiedOnly-failed-skipped;
    final String summary=(stopped?"중지됨":"작업 완료")+"\n이동 "+done+"개 · 정리됨 "+skipped+"개 · 원본 삭제 미확인 "+copiedOnly+"개 · 미이동/오류 "+failed+"개\n"+"대상 "+plan.size()+"개 중 미처리 "+(plan.size()-done-copiedOnly-failed-skipped)+"개"+(errors.isEmpty()?"":"\n"+String.join("\n",errors))+"\n다시 작업하려면 새로 검색하세요.";
-   runOnUiThread(()->{setBusy(false);phaseText.setText(stopped?"작업 중지":"작업 완료");show(summary);new AlertDialog.Builder(this).setTitle(stopped?"중지 결과":"정리 결과").setMessage(summary).setPositiveButton("확인",null).show();});
+   runOnUiThread(()->{setBusy(false);phaseText.setText(stopped?"작업 중지":"작업 완료");show(summary);showResult(summary,movedCount,copyCount,errorCount,remainingCount);});
   });
+ }
+ private void showResult(String summary,int moved,int copied,int errors,int remaining){
+  LinearLayout body=new LinearLayout(this);body.setOrientation(1);body.setPadding(dp(20),dp(8),dp(20),dp(8));
+  LinearLayout first=new LinearLayout(this);resultMetric(first,"이동 완료",moved,teal);resultMetric(first,"미처리",remaining,muted);body.addView(first);
+  LinearLayout second=new LinearLayout(this);resultMetric(second,"원본 삭제 미확인",copied,0xffa16207);resultMetric(second,"미이동 / 오류",errors,errors>0?0xffb91c1c:muted);body.addView(second);
+  TextView detail=text(summary,13);detail.setTextColor(muted);detail.setPadding(0,dp(12),0,0);body.addView(detail);
+  ScrollView scroll=new ScrollView(this);scroll.addView(body);
+  new AlertDialog.Builder(this).setTitle(stopped?"작업을 중지했습니다":"정리 결과").setView(scroll).setPositiveButton("확인",null).show();
+ }
+ private void resultMetric(LinearLayout parent,String label,int count,int color){
+  LinearLayout metric=new LinearLayout(this);metric.setOrientation(1);metric.setPadding(dp(8),dp(8),dp(8),dp(8));
+  TextView number=text(count+"개",23);number.setTextColor(color);number.setTypeface(null,Typeface.BOLD);metric.addView(number);
+  TextView caption=text(label,12);caption.setTextColor(muted);metric.addView(caption);parent.addView(metric,new LinearLayout.LayoutParams(0,-2,1));
  }
  private void assertUnchanged(Item i)throws Exception {
   try(Cursor c=getContentResolver().query(i.uri,new String[]{DocumentsContract.Document.COLUMN_SIZE,DocumentsContract.Document.COLUMN_LAST_MODIFIED},null,null,null)){
@@ -308,4 +350,5 @@ public class MainActivity extends Activity {
  @Override public void onBackPressed(){if(busy){stopped=true;show("중지 중입니다. 완료 후 종료해 주세요.");}else super.onBackPressed();}
  @Override protected void onDestroy(){stopped=true;clock.removeCallbacks(tick);worker.shutdown();super.onDestroy();}
 }
+
 

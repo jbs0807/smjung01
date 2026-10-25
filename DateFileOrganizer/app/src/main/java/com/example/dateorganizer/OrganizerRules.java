@@ -32,7 +32,7 @@ public final class OrganizerRules {
  }
  public static String safeFeature(String raw) {
   String s=raw.trim().replaceAll("[\\p{Cntrl}\\\\/:*?\"<>|]","_").replaceAll("^[. ]+|[. ]+$","");
-  if(s.isEmpty())s="기타사진";
+  if(s.isEmpty())s="장소미상";
   return s.substring(0,Math.min(32,s.length()));
  }
  public static String uniqueName(String name,int number) {
@@ -64,17 +64,17 @@ public final class OrganizerRules {
  }
  public static String label(String raw) {
   String l=raw.toLowerCase(Locale.ROOT);
-  if(Arrays.asList("beach","sea","ocean","coast","surfing","reef").contains(l))return "바다";
+  if(Arrays.asList("beach","sea","ocean","coast","surfing","reef").contains(l))return "해변";
   if(Arrays.asList("food","dish","cuisine","meal","dessert","cake","fruit","vegetable","bread","noodle","sushi","pizza").contains(l))return "음식";
   if(Arrays.asList("flower","petal","bouquet").contains(l))return "꽃";
   if(Arrays.asList("mountain","mountain range","hill","cliff").contains(l))return "산";
-  if(Arrays.asList("forest","tree","plant","garden","park").contains(l))return "숲과공원";
+  if(Arrays.asList("forest","tree","plant","garden","park").contains(l))return "공원";
   if(Arrays.asList("dog","cat","pet","bird","animal","wildlife","fish").contains(l))return "동물";
   if(Arrays.asList("person","people","human","portrait","selfie","baby","child","bride","groom").contains(l))return "인물";
   if(Arrays.asList("car","vehicle","motorcycle","truck","train","aircraft","airplane","boat","ship").contains(l))return "탈것";
   if(Arrays.asList("building","architecture","city","skyscraper","tower","bridge","house").contains(l))return "건물";
   if(Arrays.asList("sunset","sunrise").contains(l))return "노을";
-  if(Arrays.asList("lake","river","waterfall").contains(l))return "강과호수";
+  if(Arrays.asList("lake","river","waterfall").contains(l))return "강호수";
   if(Arrays.asList("document","receipt","text","handwriting").contains(l))return "문서촬영";
   if(Arrays.asList("computer","laptop","mobile phone","electronic device").contains(l))return "전자기기";
   if(Arrays.asList("snow","winter").contains(l))return "눈풍경";

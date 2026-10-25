@@ -70,7 +70,7 @@ public class MainActivity extends Activity {
   LinearLayout checks=new LinearLayout(this);photos=check("사진",checks);videos=check("동영상",checks);docs=check("문서",checks);kinds.addView(checks);
   TextView example=text("폴더 예시   261025-바다  ·  261025-문서",12);example.setTextColor(teal);example.setPadding(0,dp(8),0,dp(8));kinds.addView(example);
   scanButton=addControl(kinds,"검색 · 분류 미리보기",this::askScan);
-  LinearLayout preview=card(content);section(preview,"분류 미리보기","촬영일 → 파일명 날짜 → 수정일 순으로 적용합니다.");
+  LinearLayout preview=card(content);section(preview,"분류 미리보기","촬영일 → 파일명 날짜 → 수정일. 저장 위치의 날짜 폴더는 재정리하지 않습니다.");
   emptyText=text("검색하면 파일별 저장 위치를 확인할 수 있습니다.",13);emptyText.setTextColor(muted);emptyText.setPadding(0,dp(16),0,dp(16));preview.addView(emptyText);
   rows=new LinearLayout(this);rows.setOrientation(1);preview.addView(rows);
   LinearLayout pages=new LinearLayout(this);previous=button("이전",()->{if(page>0){page--;render();}});next=button("다음",()->{page++;render();});pageText=text("0 / 0",13);pageText.setGravity(Gravity.CENTER);
@@ -133,6 +133,7 @@ public class MainActivity extends Activity {
     ArrayList<Item> candidates=new ArrayList<>();walk(root(src),0,candidates,p,v,d,new HashSet<>());
     for(int n=0;n<candidates.size()&&!stopped;n++){
      Item item=candidates.get(n);paintProgress("날짜 · 특징 분석",n,candidates.size(),0,item.name);
+     if(OrganizerRules.inOrganizedFolder(id(root(dst)),item.parentId,item.type)){alreadySorted++;paintProgress("정리됨 · 건너뜀",n+1,candidates.size(),0,item.name);continue;}
      date(item);if(item.type==1)classify(item);if(stopped)break;
      if(OrganizerRules.alreadyAtDestination(item.parentId,id(root(dst)),item.folder()))alreadySorted++;else found.add(item);
      paintProgress("날짜 · 특징 분석",n+1,candidates.size(),0,item.name+"\n"+item.folder());

@@ -46,6 +46,19 @@ public final class OrganizerRules {
  public static boolean excludeDestination(String source,String destination,String directory) {
   return !source.equals(destination)&&destination.equals(directory);
  }
+ public static boolean inOrganizedFolder(String destination,String parent,int type) {
+  String prefix=destination+(destination.endsWith(":")?"":"/");
+  if(!parent.startsWith(prefix))return false;
+  String folder=parent.substring(prefix.length());
+  if(folder.contains("/"))return false;
+  int dash=folder.indexOf('-');if(dash<0||dash==folder.length()-1)return false;
+  String date=folder.substring(0,dash),feature=folder.substring(dash+1);
+  if(!date.equals("날짜미상")){
+   if(!date.matches("[0-9]{6}"))return false;
+   if(ymd(2000+Integer.parseInt(date.substring(0,2)),Integer.parseInt(date.substring(2,4)),Integer.parseInt(date.substring(4,6)))==null)return false;
+  }
+  return type==1||type==2&&feature.equals("동영상")||type==3&&feature.equals("문서");
+ }
  public static boolean alreadyAtDestination(String parent,String destination,String folder) {
   return parent.equals(destination+(destination.endsWith(":")?"":"/")+folder);
  }

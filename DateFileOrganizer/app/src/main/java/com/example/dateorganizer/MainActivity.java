@@ -9,6 +9,8 @@ import android.database.Cursor;
 import android.graphics.*;
 import android.graphics.drawable.GradientDrawable;
 import android.media.ExifInterface;
+import android.location.Geocoder;
+import android.location.Address;
 import android.media.MediaMetadataRetriever;
 import android.view.*;
 import android.widget.*;
@@ -46,7 +48,7 @@ public class MainActivity extends Activity {
  private final int ink=Color.rgb(22,36,58),teal=Color.rgb(0,116,104),muted=Color.rgb(100,116,139),line=Color.rgb(224,231,239);
  private static class Item {
   Uri uri;String parentId,name,mime,date,reason,feature="",featureReason="";int type;long size,modified;
-  String folder(){return date+"-"+(type==1?OrganizerRules.safeFeature(feature):type==2?"동영상":"문서");}
+  String folder(){return date+"-"+OrganizerRules.safeFeature(feature);}
  }
  @Override public void onCreate(Bundle state){
   super.onCreate(state);
@@ -131,10 +133,18 @@ public class MainActivity extends Activity {
    try {
     if(p)labeler=ImageLabeling.getClient(new ImageLabelerOptions.Builder().setConfidenceThreshold(.70f).build());
     ArrayList<Item> candidates=new ArrayList<>();walk(root(src),0,candidates,p,v,d,new HashSet<>());
-    for(int n=0;n<candidates.size()&&!stopped;n++){
+    candidates.sort(Comparator.comparing((Item x)->x.name).thenComparing(x->x.uri.toString()));
+     for(Item item:candidates){if(stopped)break;date(item);}
+     HashMap<String,String> byDate=new HashMap<>();
+     for(Item item:candidates){
+      if(stopped)break;
+      if(item.type==1&&!byDate.containsKey(item.date))byDate.put(item.date,photoLocation(item));
+     }
+     for(int n=0;n<candidates.size()&&!stopped;n++){
      Item item=candidates.get(n);paintProgress("날짜 · 특징 분석",n,candidates.size(),0,item.name);
      if(OrganizerRules.inOrganizedFolder(id(root(dst)),item.parentId,item.type)){alreadySorted++;paintProgress("정리됨 · 건너뜀",n+1,candidates.size(),0,item.name);continue;}
-     date(item);if(item.type==1)classify(item);if(stopped)break;
+     item.feature=byDate.containsKey(item.date)?byDate.get(item.date):"위치미상";
+      item.featureReason=item.type==1?"같은 날짜 첫 사진의 GPS 기준":"같은 날짜 사진의 위치 기준";
      if(OrganizerRules.alreadyAtDestination(item.parentId,id(root(dst)),item.folder()))alreadySorted++;else found.add(item);
      paintProgress("날짜 · 특징 분석",n+1,candidates.size(),0,item.name+"\n"+item.folder());
     }
@@ -177,7 +187,24 @@ public class MainActivity extends Activity {
   if(i.date==null&&i.modified>0){i.date=new SimpleDateFormat("yyMMdd",Locale.KOREA).format(new Date(i.modified));i.reason="파일 수정일";}
   if(i.date==null){i.date="날짜미상";i.reason="날짜 정보 없음";}
  }
- private void classify(Item i){
+ private String photoLocation(Item item){
+   try(InputStream in=getContentResolver().openInputStream(item.uri)){
+    if(in==null)return "위치미상";
+    ExifInterface exif=new ExifInterface(in);float[] latLong=new float[2];
+    if(!exif.getLatLong(latLong)||!Geocoder.isPresent())return "위치미상";
+    Geocoder geocoder=new Geocoder(this,Locale.KOREA);
+    List<Address> addresses=geocoder.getFromLocation(latLong[0],latLong[1],1);
+    if(addresses==null||addresses.isEmpty())return "위치미상";
+    Address address=addresses.get(0);
+    String city=address.getLocality();
+    if(city==null||city.isEmpty())city=address.getSubAdminArea();
+    String dong=address.getSubLocality();
+    if(dong==null||dong.isEmpty())dong=address.getThoroughfare();
+    if(city==null||city.isEmpty()||dong==null||dong.isEmpty())return "위치미상";
+    return OrganizerRules.safeFeature(city+dong);
+   }catch(Exception e){return "위치미상";}
+  }
+  private void classify(Item i){
   if(i.name.toLowerCase(Locale.ROOT).matches(".*(screenshot|screen_shot|스크린샷|화면캡처).*")){i.feature="스크린샷";i.featureReason="파일명 기준";return;}
   i.feature="장소미상";i.featureReason="장소 단서 없음 · 직접 수정 가능";Bitmap bitmap=null;
   try{
@@ -204,8 +231,8 @@ public class MainActivity extends Activity {
   }
  }
  private void edit(Item i){
-  String old=i.folder();LinearLayout l=new LinearLayout(this);l.setOrientation(1);l.setPadding(dp(20),dp(8),dp(20),0);EditText input=new EditText(this);input.setSingleLine(true);input.setText(i.feature);l.addView(input);CheckBox group=new CheckBox(this);group.setText("같은 날짜·특징의 사진에 함께 적용");group.setChecked(true);l.addView(group);
-  new AlertDialog.Builder(this).setTitle(i.date+"-요약장소 수정").setView(l).setNegativeButton("취소",null).setPositiveButton("적용",(d,w)->{String f=OrganizerRules.safeFeature(input.getText().toString());for(Item x:items)if(x==i||(group.isChecked()&&x.type==1&&x.folder().equals(old))){x.feature=f;x.featureReason="직접 지정";}render();}).show();
+  String old=i.folder();LinearLayout l=new LinearLayout(this);l.setOrientation(1);l.setPadding(dp(20),dp(8),dp(20),0);EditText input=new EditText(this);input.setSingleLine(true);input.setText(i.feature);l.addView(input);CheckBox group=new CheckBox(this);group.setText("같은 날짜의 모든 파일에 적용");group.setChecked(true);l.addView(group);
+  new AlertDialog.Builder(this).setTitle(i.date+"-요약장소 수정").setView(l).setNegativeButton("취소",null).setPositiveButton("적용",(d,w)->{String f=OrganizerRules.safeFeature(input.getText().toString());for(Item x:items)if(x==i||(group.isChecked()&&x.date.equals(i.date))){x.feature=f;x.featureReason="직접 지정";}render();}).show();
  }
  private void askMove(){
   if(busy||!ready||items.isEmpty())return;

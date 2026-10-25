@@ -59,6 +59,10 @@ class MainActivity : Activity() {
  private var deleteFailed=0
  private var awaitingDeletePermission=false
  private var deletionRunning=false
+ private var permissionForUri:Uri?=null
+ private val sessionWriteTrees=linkedSetOf<Uri>()
+ private val documentAliases=java.util.concurrent.ConcurrentHashMap<Uri,Uri>()
+ private val candidateRows=mutableMapOf<Uri,View>()
  private var deleteTotal=0
  private val tiles=linkedMapOf<String,TextView>()
  private lateinit var runButton:TextView
@@ -199,20 +203,20 @@ class MainActivity : Activity() {
   tiles.forEach { (name,tile) ->
    tile.isSelected=name==lastAction
    tile.isActivated=busy && name==task?.label
-   tile.isEnabled=!busy
+   tile.isEnabled=!busy && !awaitingDeletePermission && !deletionRunning
    tile.alpha=if(busy && !tile.isActivated) 0.5f else 1f
    tile.contentDescription=name+if(tile.isActivated) " · 작업 중" else if(tile.isSelected) " · 선택됨" else ""
   }
   if(::runButton.isInitialized) {
    workingSpinner.visibility=if(busy) View.VISIBLE else View.GONE
-   runButton.isEnabled=!busy
+   runButton.isEnabled=!busy && !awaitingDeletePermission && !deletionRunning
    val runColor=if(busy) Color.rgb(210,100,0) else Color.rgb(0,176,118)
    runButton.background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,intArrayOf(lighten(runColor),runColor)).apply { cornerRadius=dp(16).toFloat(); setStroke(dp(1),Color.WHITE) }
    runButton.text=if(busy) "작업 중" else "실행"
    stopButton.isEnabled=busy && task?.cancelled==false
    stopButton.alpha=if(stopButton.isEnabled) 1f else 0.4f
    stopButton.text=if(task?.cancelled==true) "중지 중…" else "작업 중지"
-   trashButton.isEnabled=!busy
+   trashButton.isEnabled=!busy && !awaitingDeletePermission
   }
  }
  private fun update(message:String,done:Int=0,total:Int=0) {
@@ -256,6 +260,7 @@ class MainActivity : Activity() {
      if(task!==t || closing || isFinishing || isDestroyed) return@runOnUiThread
      if(t.cancelled || e is CancellationException) finishStopped(t) else {
       update("${label} 오류: ${e.message}",t.done,t.total)
+      if(label=="사진 삭제") deletionRunning=false
       task=null; busy=false; refreshControls()
      }
     }
@@ -271,6 +276,10 @@ class MainActivity : Activity() {
  private fun finishStopped(t:Task) {
   update("${t.label} 중지됨 · 다시 실행할 수 있습니다",t.done,t.total)
   if(t.label=="중복 분석") percent.append("\n중복 사진 ${t.duplicates}장 발견 · ${t.groups}그룹 (중간 결과)")
+  if(t.label=="사진 삭제") {
+   deletionRunning=false
+   details.text="영구 삭제 ${deletedCount}장 · 실패 ${deleteFailed}장 · 미처리 ${pendingDelete.size}장"
+  }
   task=null; busy=false; refreshControls()
  }
  private fun exitImmediately() {
@@ -307,20 +316,20 @@ class MainActivity : Activity() {
    }
    return
   }
-  if(requestCode==3) {
+  if(requestCode==22) {
    awaitingDeletePermission=false
-   if(resultCode==RESULT_OK) continueLegacyDelete() else {
-    val remaining=pendingDelete.size
-    pendingDelete.clear(); deletionRunning=false
-    update("삭제 승인 거부 · 나머지 ${remaining}장 중단",deletedCount+deleteFailed,deleteTotal)
-    details.text="삭제 성공 ${deletedCount}장 · 실패 ${deleteFailed}장 · 미처리 ${remaining}장"
-    refreshControls()
+   val target=permissionForUri; permissionForUri=null
+   val tree=data?.data
+   val flags=(data?.flags ?: 0) and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+   if(resultCode!=RESULT_OK || tree==null || flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION==0) {
+    deletionRunning=false
+    update("폴더 권한 설정 취소 · 남은 사진은 삭제하지 않았습니다")
+    details.text="삭제 ${deletedCount}장 · 미처리 ${pendingDelete.size}장"
+    refreshControls(); return
    }
-   return
-  }
-  if(requestCode==2) {
-   if(resultCode==RESULT_OK) { update("시스템 휴지통 요청 승인됨 · 사진 목록을 다시 확인하세요"); checkedCandidates.clear(); candidates=emptyList(); resultBox.removeAllViews() }
-   else update("휴지통 이동 취소됨 · 사진은 보존되었습니다")
+   try { contentResolver.takePersistableUriPermission(tree,flags) } catch(_:SecurityException) { }
+   sessionWriteTrees.add(tree)
+   continueFolderDelete(target)
    return
   }
   if(requestCode==1 && resultCode==RESULT_OK) {
@@ -428,6 +437,7 @@ class MainActivity : Activity() {
     else if(mime.startsWith("image/")) {
      val mediaUri=try { MediaStore.getMediaUri(this,uri) } catch(_:Exception) { null }
      val photo=mediaUri ?: uri
+     documentAliases[photo]=uri
      photos.add(photo); mediaSizes[photo]=if(cursor.isNull(3)) -1L else cursor.getLong(3)
      if(mediaUri==null || !mediaDates.containsKey(photo)) mediaDates[photo]=cursor.getLong(4)
     }
@@ -621,7 +631,7 @@ class MainActivity : Activity() {
   }
  }
  private fun renderResults(groups:List<List<Uri>>,previews:Map<Uri,Bitmap?>,duplicateCount:Int) {
-  resultBox.removeAllViews()
+  resultBox.removeAllViews(); candidateRows.clear()
   add(resultBox,text(if(duplicateCount==0) "중복된 사진이 없습니다." else "중복 ${duplicateCount}장 발견 · 각 그룹 첫 사진은 보존",15f,navy,true),8)
   groups.forEachIndexed { index,group ->
    val card=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(8),dp(8),dp(8),dp(8)); background=shape(Color.rgb(241,247,253),18f) }
@@ -637,9 +647,11 @@ class MainActivity : Activity() {
      setOnCheckedChangeListener { _,value -> if(value) checkedCandidates.add(uri) else checkedCandidates.remove(uri) }
     }
     line.addView(check,LinearLayout.LayoutParams(0,-2,1f)); add(card,line,6)
+    if(i!=0) candidateRows[uri]=line
    }
    add(resultBox,card,12)
   }
+  if(duplicateCount>0) add(resultBox,text("실행하면 선택한 삭제대상을 영구 삭제합니다. 폴더 권한은 처음 한 번만 허용하세요.",12f,Color.DKGRAY),8)
   if(candidates.size<duplicateCount) add(resultBox,text("화면에는 최대 80그룹·160장만 표시합니다. 표시하지 않은 사진은 휴지통 대상으로 선택되지 않습니다.",13f,Color.DKGRAY),8)
  }
  private fun selectScreenshots() {
@@ -782,47 +794,128 @@ class MainActivity : Activity() {
   }
   dialog.show()
  }
- private fun continueLegacyDelete() {
-  if(Build.VERSION.SDK_INT>=30 || awaitingDeletePermission || !deletionRunning) return
-  while(pendingDelete.isNotEmpty()) {
-   val uri=pendingDelete.first()
-   try {
-    val rows=contentResolver.delete(uri,null,null)
-    if(rows>0) { deletedCount++; checkedCandidates.remove(uri) } else deleteFailed++
-    pendingDelete.removeAt(0)
-   } catch(e:android.app.RecoverableSecurityException) {
-    try {
-     awaitingDeletePermission=true
-     update("Android 10 시스템 승인 대기 · ${deletedCount+deleteFailed+1}/${deleteTotal}장",deletedCount+deleteFailed,deleteTotal)
-     startIntentSenderForResult(e.userAction.actionIntent.intentSender,3,null,0,0,0)
-     return
-    } catch(ex:Exception) {
-     awaitingDeletePermission=false; deleteFailed++; pendingDelete.removeAt(0)
-    }
-   } catch(e:Exception) {
-    deleteFailed++; pendingDelete.removeAt(0)
-   }
-   update("사진 삭제 처리 중 · 성공 ${deletedCount}장 · 실패 ${deleteFailed}장",deletedCount+deleteFailed,deletedCount+deleteFailed+pendingDelete.size)
+ private fun mediaFileLocation(t:Task,uri:Uri):Triple<String,String,String>? {
+  if(uri.authority!="media") return null
+  return contentResolver.query(uri,arrayOf("volume_name","relative_path","_display_name"),null,null,null,t.signal)?.use { c ->
+   if(!c.moveToFirst() || c.isNull(0) || c.isNull(1) || c.isNull(2)) null
+   else Triple(c.getString(0),c.getString(1),c.getString(2))
   }
-  deletionRunning=false
-  update("삭제 완료 · 성공 ${deletedCount}장 · 실패 ${deleteFailed}장",deleteTotal,deleteTotal)
-  details.text="Android 10 영구 삭제 결과 · 성공 ${deletedCount}장 · 실패 ${deleteFailed}장"
-  candidates=emptyList(); resultBox.removeAllViews()
-  Toast.makeText(this,"삭제 ${deletedCount}장, 실패 ${deleteFailed}장",Toast.LENGTH_LONG).show()
+ }
+ private fun writableDocument(t:Task,uri:Uri):Uri? {
+  checkTask(t)
+  val direct=documentAliases[uri] ?: uri
+  if(android.provider.DocumentsContract.isDocumentUri(this,direct) &&
+   checkUriPermission(direct,android.os.Process.myPid(),android.os.Process.myUid(),Intent.FLAG_GRANT_WRITE_URI_PERMISSION)==PackageManager.PERMISSION_GRANTED) return direct
+  val trees=contentResolver.persistedUriPermissions.filter { it.isWritePermission }.map { it.uri }+sessionWriteTrees.toList()
+  if(android.provider.DocumentsContract.isDocumentUri(this,direct)) {
+   for(tree in trees.distinct()) {
+    checkTask(t)
+    if(tree.authority!=direct.authority || !android.provider.DocumentsContract.isTreeUri(tree)) continue
+    val parent=android.provider.DocumentsContract.buildDocumentUriUsingTree(tree,android.provider.DocumentsContract.getTreeDocumentId(tree))
+    val doc=android.provider.DocumentsContract.buildDocumentUriUsingTree(tree,android.provider.DocumentsContract.getDocumentId(direct))
+    try { if(android.provider.DocumentsContract.isChildDocument(contentResolver,parent,doc)) return doc }
+    catch(_:Exception) { checkTask(t) }
+   }
+  }
+  val file=mediaFileLocation(t,uri) ?: if(uri.authority=="media") throw java.io.FileNotFoundException("사진이 이동되거나 삭제되었습니다") else return null
+  for(tree in trees.distinct()) {
+   checkTask(t)
+   if(tree.authority!="com.android.externalstorage.documents" || !android.provider.DocumentsContract.isTreeUri(tree)) continue
+   val id=FolderScope.documentId(android.provider.DocumentsContract.getTreeDocumentId(tree),file.first,file.second,file.third) ?: continue
+   val doc=android.provider.DocumentsContract.buildDocumentUriUsingTree(tree,id)
+   if(checkUriPermission(doc,android.os.Process.myPid(),android.os.Process.myUid(),Intent.FLAG_GRANT_WRITE_URI_PERMISSION)==PackageManager.PERMISSION_GRANTED) return doc
+  }
+  return null
+ }
+ private fun folderHint(t:Task,uri:Uri):Pair<Uri?,String> {
+  val file=mediaFileLocation(t,uri)
+  if(file!=null) {
+   val volume=if(file.first==MediaStore.VOLUME_EXTERNAL_PRIMARY) "primary" else file.first
+   val id="$volume:${file.second.trim('/')}"
+   return android.provider.DocumentsContract.buildDocumentUri("com.android.externalstorage.documents",id) to
+    "${if(volume=="primary") "내부 저장소" else "SD 카드"} / ${file.second}"
+  }
+  return (documentAliases[uri] ?: uri) to "삭제할 사진이 들어 있는 폴더"
+ }
+ private fun requestFolderPermission(uri:Uri,hint:Pair<Uri?,String>) {
+  if(closing || isFinishing) return
+  permissionForUri=uri; awaitingDeletePermission=true
+  update("최초 1회: ${hint.second} 폴더를 선택하고 접근을 허용해 주세요")
+  details.text="허용한 폴더에서는 사진별 확인 없이 영구 삭제합니다 · 남은 ${pendingDelete.size}장"
+  refreshControls()
+  Toast.makeText(this,"${hint.second} 선택 → 이 폴더 사용 → 허용",Toast.LENGTH_LONG).show()
+  try {
+   startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+    hint.first?.let { putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI,it) }
+   },22)
+  } catch(e:Exception) {
+   awaitingDeletePermission=false; deletionRunning=false; permissionForUri=null
+   update("폴더 권한 창을 열 수 없습니다: ${e.message}"); refreshControls()
+  }
+ }
+ private fun continueFolderDelete(justGrantedFor:Uri?=null) {
+  if(busy || awaitingDeletePermission || !deletionRunning || closing) return
+  val batch=pendingDelete.toList()
+  // The queue is fixed by the user's execution; newly checked items are not added mid-task.
+  work("사진 삭제") { t ->
+   if(justGrantedFor!=null && writableDocument(t,justGrantedFor)==null) {
+    val complete:()->Unit={
+     deletionRunning=false
+     update("선택한 폴더에 삭제대상이 없거나 쓰기 권한이 없습니다")
+     details.text="삭제할 사진이 있는 폴더를 선택해야 합니다. 실행을 눌러 다시 설정하세요."
+    }
+    return@work complete
+   }
+   var permissionNeeded:Uri?=null
+   var hint:Pair<Uri?,String>?=null
+   var done=deletedCount+deleteFailed
+   for(uri in batch) {
+    checkTask(t)
+    var success=false
+    try {
+     val doc=writableDocument(t,uri)
+     if(doc==null) { permissionNeeded=uri; hint=folderHint(t,uri); break }
+     // Never delete a folder, even if the selected file's identity changed.
+     val canDelete=contentResolver.query(doc,arrayOf("mime_type","flags"),null,null,null,t.signal)?.use { c ->
+      c.moveToFirst() && c.getString(0)!="vnd.android.document/directory" &&
+       c.getInt(1) and android.provider.DocumentsContract.Document.FLAG_SUPPORTS_DELETE!=0
+     } ?: false
+     checkTask(t)
+     if(canDelete) success=android.provider.DocumentsContract.deleteDocument(contentResolver,doc)
+    } catch(e:Exception) { checkTask(t) }
+    // Commit each completed deletion to UI state before cancellation can end the task.
+    val deleted=success
+    runOnUiThread {
+     pendingDelete.remove(uri)
+     if(deleted) {
+      deletedCount++; checkedCandidates.remove(uri); candidates=candidates.filter { it!=uri }; selected.remove(uri)
+      candidateRows.remove(uri)?.visibility=View.GONE
+      mediaDates.remove(uri); mediaSizes.remove(uri); mediaLocations.remove(uri); documentAliases.remove(uri)
+      mediaRevision.incrementAndGet()
+     } else deleteFailed++
+     details.text="영구 삭제 ${deletedCount}장 · 실패 ${deleteFailed}장 · 미처리 ${pendingDelete.size}장"
+    }
+    done++; report(t,"사진 삭제 중…",done,deleteTotal)
+   }
+   val needs=permissionNeeded; val initial=hint
+   val complete:()->Unit={
+    if(needs!=null && initial!=null) pageScroll.post { if(!closing && deletionRunning) requestFolderPermission(needs,initial) }
+    else {
+     deletionRunning=false
+     update("삭제 완료 · 성공 ${deletedCount}장 · 실패 ${deleteFailed}장",deletedCount+deleteFailed,deleteTotal)
+     details.text="영구 삭제 ${deletedCount}장 · 실패 ${deleteFailed}장"
+     if(candidates.isEmpty()) resultBox.removeAllViews()
+    }
+   }; complete
+  }
  }
  private fun requestTrash() {
-  if(checkedCandidates.isEmpty()) { Toast.makeText(this,"선택된 삭제대상이 없습니다",Toast.LENGTH_SHORT).show(); return }
-  val count=checkedCandidates.size
-  val legacy=Build.VERSION.SDK_INT<30
-  // 실행 버튼은 앱 자체의 재확인 창을 띄우지 않습니다.
-  // Android가 요구하는 시스템 권한 승인 창은 생략할 수 없습니다.
-  if(!legacy) {
-   try { startIntentSenderForResult(MediaStore.createTrashRequest(contentResolver,checkedCandidates.toList(),true).intentSender,2,null,0,0,0) }
-   catch(e:Exception) { update("휴지통 이동 오류: ${e.message}") }
-  } else {
-   pendingDelete=checkedCandidates.toMutableList()
-   deletedCount=0; deleteFailed=0; deleteTotal=pendingDelete.size; deletionRunning=true
-   continueLegacyDelete()
-  }
+  if(busy || awaitingDeletePermission || deletionRunning) return
+  val targets=checkedCandidates.filter { it in candidates }
+  if(targets.isEmpty()) { Toast.makeText(this,"선택된 삭제대상이 없습니다",Toast.LENGTH_SHORT).show(); return }
+  pendingDelete=targets.toMutableList()
+  deletedCount=0; deleteFailed=0; deleteTotal=pendingDelete.size; deletionRunning=true
+  continueFolderDelete()
  }
 }
